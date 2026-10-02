@@ -19,8 +19,31 @@ public final class DurableState implements AutoCloseable {
         this.directory = directory;
         Files.createDirectories(directory);
         lockChannel = FileChannel.open(directory.resolve("node.lock"), CREATE, WRITE);
-        lock = lockChannel.tryLock();
-        if (lock == null) { lockChannel.close(); throw new IOException("data directory in use"); }
+        try {
+            lock = lockChannel.tryLock();
+            if (lock == null) throw new IOException("data directory in use");
+        } catch (IOException | RuntimeException e) {
+            try { lockChannel.close(); } catch (IOException closeError) { e.addSuppressed(closeError); }
+            throw e;
+        }
+    }
+    public void bindIdentity(int id, Map<Integer, java.net.URI> peers) throws IOException {
+        byte[] identity = encode(o -> {
+            o.writeInt(0x4d534931); o.writeInt(id); o.writeInt(peers.size());
+            for (var peer : new TreeMap<>(peers).entrySet()) {
+                o.writeInt(peer.getKey()); o.writeUTF(peer.getValue().toString());
+            }
+        });
+        Path path = directory.resolve("identity.bin");
+        if (Files.exists(path)) {
+            if (!Arrays.equals(Files.readAllBytes(path), identity))
+                throw new IOException("node or fixed peer configuration differs from stored identity");
+        } else {
+            // An old log cannot safely be assigned whichever identity the caller supplies.
+            if (Files.exists(directory.resolve("state.bin")))
+                throw new IOException("existing state has no identity; automatic migration refused");
+            writeAtomic("identity.bin", identity);
+        }
     }
     private static byte[] digest(byte[] data) {
         try { return MessageDigest.getInstance("SHA-256").digest(data); }
@@ -48,17 +71,21 @@ public final class DurableState implements AutoCloseable {
         byte[] body = encode(o -> {o.writeInt(0x4d535131); o.writeLong(state.term());
             o.writeInt(state.votedFor()); o.writeInt(state.committed());
             o.writeInt(state.entries().size()); for (Entry e : state.entries()) entry(o, e);});
-        Path temp = directory.resolve("state.tmp");
+        var data = java.nio.ByteBuffer.allocate(body.length + 32).put(body).put(digest(body));
+        writeAtomic("state.bin", data.array());
+    }
+    private void writeAtomic(String name, byte[] bytes) throws IOException {
+        Path temp = directory.resolve(name + ".tmp");
         try (var file = FileChannel.open(temp, CREATE, TRUNCATE_EXISTING, WRITE)) {
-            var data = java.nio.ByteBuffer.wrap(body);
-            while (data.hasRemaining()) file.write(data);
-            data = java.nio.ByteBuffer.wrap(digest(body));
+            var data = java.nio.ByteBuffer.wrap(bytes);
             while (data.hasRemaining()) file.write(data);
             file.force(true);
         }
-        Files.move(temp, directory.resolve("state.bin"), StandardCopyOption.ATOMIC_MOVE,
+        Files.move(temp, directory.resolve(name), StandardCopyOption.ATOMIC_MOVE,
                    StandardCopyOption.REPLACE_EXISTING);
         try (var dir = FileChannel.open(directory, READ)) { dir.force(true); }
     }
-    @Override public void close() throws IOException { lock.release(); lockChannel.close(); }
+    @Override public void close() throws IOException {
+        try { if (lock.isValid()) lock.release(); } finally { lockChannel.close(); }
+    }
 }

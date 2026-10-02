@@ -64,8 +64,12 @@ Normal endpoints bind only to localhost; all local peers/callers are trusted.
 --test-controls explicitly enables local partition injection; NEVER expose it.
 Process SIGKILL tests are not physical power-loss/filesystem durability tests.
 Directory fsync and atomic moves must be supported by the local filesystem.
-Reuse each data directory only for the SAME node ID and SAME fixed membership;
-this version does not persist cluster identity/configuration metadata.
+Reuse each data directory only for the SAME node ID and SAME fixed membership.
+An atomic identity file binds node ID and the exact peer URI map before any Raft
+state is loaded. Different IDs/endpoints or legacy state without identity are
+rejected, not silently migrated. Failed initialization releases the directory lock.
+The binding is configuration identity, not a globally unique cluster incarnation:
+do not reuse old directories when creating a new logical cluster on the same ports.
 The bounded tests demonstrate specific scenarios, not a proof of Raft correctness.
 
 Reading references (architectural inspiration, no library implementation imported)

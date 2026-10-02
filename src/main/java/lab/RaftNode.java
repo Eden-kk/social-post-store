@@ -31,9 +31,16 @@ public final class RaftNode implements AutoCloseable {
         if (!peers.containsKey(id) || peers.size() != 3 || new HashSet<>(peers.values()).size() != 3)
             throw new IllegalArgumentException("exactly 3 distinct fixed peers required");
         this.id = id; this.peers = Map.copyOf(peers); storage = new DurableState(directory);
-        var state = storage.load(); term = state.term(); votedFor = state.votedFor();
-        committed = state.committed(); log.add(new Entry(0, "", "")); log.addAll(state.entries());
-        applyCommitted(); resetElection();
+        try {
+            storage.bindIdentity(id, this.peers);
+            var state = storage.load(); term = state.term(); votedFor = state.votedFor();
+            committed = state.committed(); log.add(new Entry(0, "", "")); log.addAll(state.entries());
+            applyCommitted(); resetElection();
+        } catch (IOException | RuntimeException e) {
+            timer.shutdownNow();
+            try { storage.close(); } catch (IOException closeError) { e.addSuppressed(closeError); }
+            throw e;
+        }
     }
     public void start() { timer.scheduleWithFixedDelay(this::tickSafely, 30, 30, TimeUnit.MILLISECONDS); }
     private int lastIndex() { return log.size() - 1; }

@@ -32,5 +32,21 @@ coverage; DELETE regression added. Reviews are static, not formal verification.
 
 Not verified: arbitrary fault schedules, linearizability history checking,
 physical machine power loss, multi-host behavior, snapshots, sharding, performance.
-Node state directories must not be reassigned to a different cluster/node ID.
+Node state directories must not be reassigned to a different logical cluster.
 Logs and test data remain private/local, not uploaded. No applications submitted.
+
+Recovery identity unit — 2026-10-01
+Persisted node ID + sorted exact peer URI map before loading Raft state. Startup
+rejects changed node ID, changed endpoints, damaged identity bytes, and legacy
+state without identity (no automatic migration). Initialization failures close
+storage locks, and lock-acquisition failures close their file channels.
+IdentityTest covers matching restart with reordered map, node/endpoint mismatch
+without identity overwrite, corrupt identity rejection, truncated state rejection
+followed by lock reacquisition and repaired restart, overlapping lock rejection,
+and refusal to assign identity to pre-existing legacy state.
+Focused test passed. Full suite passed SQL/storage/identity tests and all 3/3
+three-JVM cluster rounds; ALL_TESTS_PASSED in:
+  /tmp/minisql-recovery-identity-verification.log
+This binding is not a unique cluster UUID, membership migration, or authentication.
+Reusing all endpoints for a new logical cluster requires new directories. Exact URI
+matching intentionally rejects textual endpoint changes, including benign aliases.
