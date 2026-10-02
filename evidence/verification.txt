@@ -1,0 +1,27 @@
+SqlEngineTest passed
+DurableStateTest passed; evidence=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-state-test-15265559726648609996
+CLUSTER_ROUND=1
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-5449301091694406248
+PASS replicated CRUD and payload-bound duplicate retry
+PASS abrupt leader kill, election, retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+CLUSTER_ROUND=2
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-3011340872145016540
+PASS replicated CRUD and payload-bound duplicate retry
+PASS abrupt leader kill, election, retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+CLUSTER_ROUND=3
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-4401661640570763751
+PASS replicated CRUD and payload-bound duplicate retry
+PASS abrupt leader kill, election, retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+ALL_TESTS_PASSED

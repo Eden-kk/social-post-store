@@ -9,4 +9,10 @@ Initial storage uses full-log recovery, with no snapshot compaction. No sharding
 transactions across nodes/shards, authentication or public-network deployment.
 Preserve original coursework and other career projects; no resume submission.
 
-Build/test commands and measured results will be recorded after verification.
+Build: sh build.sh. Verification: sh test.sh. Manual demo: README.txt.
+Source is entirely new AI-assisted work. No original coursework files modified.
+Implementation includes a custom restricted SQL state machine and custom Java
+Raft implementation, not SOFAJRaft/rqlite libraries. Reading references are
+credited in README.txt; a static independent review checked safety boundaries.
+Whole-log recovery deliberately defers snapshot/compaction. Do not describe this
+MVP as fulfilling every future feature in the earlier theoretical design.

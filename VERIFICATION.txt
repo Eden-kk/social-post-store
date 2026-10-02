@@ -1,0 +1,36 @@
+Verification record — 2026-10-01, local macOS
+
+Environment: OpenJDK 23.0.2; javac --release 17. No third-party runtime dependency.
+Unit entrypoints: lab.SqlEngineTest, lab.DurableStateTest.
+Integration entrypoint: lab.ClusterTest, launched by test.sh for three rounds.
+
+SQL tests: CRUD, LONG/TEXT parsing, primary keys, deterministic projection/order,
+overflow and invalid-write atomicity, replay, 10,000 seeded malformed-input cases.
+Storage tests: durable reload, checksum rejects a modified state file, duplicate
+peer endpoints rejected. These tests do not simulate physical power loss.
+
+Integration assertions: three separate JVMs, HTTP over localhost, separate data
+directories, randomized election timers. Replicated SQL operations and request-ID
+payload binding; leader SIGKILL, replacement election and retry; restarted peer
+catch-up; symmetric test-injected partition blocks RPCs, minority cannot confirm
+fresh write/read, majority accepts same retry, partition heals; all-node SIGKILL
+and restart; sixteen increment requests using four client threads; each of three
+persisted logs independently replayed and checked for matching expected data.
+
+First expanded run: /tmp/minisql-verify-20261001.log, ALL_TESTS_PASSED, 3/3 rounds.
+The initial log label said CRUD although cluster test did not yet exercise DELETE;
+DELETE was then explicitly added (including persisted-replica replay assertions).
+Final exact-source verification: /tmp/minisql-verify-final-20261001.log.
+Completion checked: ALL_TESTS_PASSED, all 3/3 final rounds passed. Persistent
+verification session exited. A copy of final stdout is in evidence/verification.txt.
+
+Independent review: no blocking safety defect under fixed distinct peer config,
+trusted localhost callers and filesystem atomic-move/fsync support. Addressed
+duplicate endpoint acceptance and a mismatch between save/load entry-count limits.
+Second review found no blockers, clarified concurrency count and missing DELETE
+coverage; DELETE regression added. Reviews are static, not formal verification.
+
+Not verified: arbitrary fault schedules, linearizability history checking,
+physical machine power loss, multi-host behavior, snapshots, sharding, performance.
+Node state directories must not be reassigned to a different cluster/node ID.
+Logs and test data remain private/local, not uploaded. No applications submitted.
