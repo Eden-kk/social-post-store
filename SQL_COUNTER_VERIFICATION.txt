@@ -80,3 +80,8 @@ Raft evidence:
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-1638745682072642629
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-2337502844470577165
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-10943956798926328641
+
+2026-10-13 final delivery additionally verifies typed lost-ACK replay, sender
+restart/retry, exact total 17 and pending=2 -> pending=0 after healing. Full suite
+and one-command integrated demo pass in the main checkout; concrete evidence and
+independent review disposition: evidence/delivery-verification.txt.

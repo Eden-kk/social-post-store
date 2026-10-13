@@ -1,0 +1,51 @@
+Distributed MiniSQL — local project delivery
+
+Agreed scope: a locally demonstrable database project, reproducible fault tests,
+accurate resume material and interview preparation. Not production deployment.
+
+Start here
+  sh demo.sh   — narrated application lifecycle with assertions and retained evidence
+  sh test.sh   — unit tests, counter integration tests and three Raft fault rounds
+Requirements: JDK 17+, POSIX shell, local ports. No cloud resources or dependencies.
+DEMO.txt describes outcomes, cleanup and evidence paths.
+
+One-project contract
+One SQL endpoint expresses two explicit operation contracts. Raft orders ordinary
+records and immutable COUNTER schemas. A replica with committed schema accepts
+origin-bound INCREMENT locally and serves SELECT EVENTUAL locally. Counter state
+is reconciled independently; this is not a transaction spanning the two stores.
+The application flow associates metadata and counters by key, not a foreign key.
+
+Completion evidence map
+Schema validation and routing: SqlCounterTest, SqlCounterClusterTest.
+Normal ordered CRUD/recovery: SqlEngineTest, DurableStateTest, ClusterTest.
+Stable identity and compatible replay: IdentityTest.
+Bounded ordinary SQL retries: SqlClientTest and ClusterTest.
+Counter algebra, durable dedup/outbox: CounterTest.
+Partitioned increments, restart, ACK loss/repair: CounterClusterTest and
+SqlCounterClusterTest. Narrated application/recovery flow: ProjectDemo.
+Concrete final run locations and review disposition: evidence/delivery-verification.txt.
+
+Safety and limitations
+LOCAL_DURABLE means one durable local copy. Permanent loss before replication can
+lose accepted data. Counter retries cannot transparently move to another origin.
+Convergence requires resumed delivery and merged state within capacity. Whole-state
+replication is capped at 900,000 bytes and local request retention at 100,000 IDs.
+No counter reset/delete, mixed scalar rows, schema changes or foreign keys.
+No snapshots, log compaction, dynamic membership, sharding, authentication, external
+broker, physical multi-region validation or production throughput claim.
+Fresh data directories and same-version peers only; no rolling migration. Never
+manually add a dialect marker to legacy logs. Test controls stay loopback-only.
+Scenario tests are evidence for covered cases, not a formal Raft correctness proof.
+
+Interview materials (private, outside this repository)
+career-hub/resumes/minisql_raft_rebuilt_material.txt — evidence and provenance
+career-hub/resumes/minisql_interview_pack.txt — bilingual narrative and deep dives
+career-hub/resumes/tiktok_social_graph_return_deep_dive.txt — internship companion
+Only verified behavior belongs on the resume. Do not attach TT Counter2.0 ownership
+or historical coursework implementation claims to this reconstruction.
+
+Stop condition
+Once main-checkout demo/regression pass and the scoped review issue is resolved,
+this local-delivery scope is complete. Production hardening is separate future
+work, not an unfulfilled promise of this delivery. No deployment or push is implied.

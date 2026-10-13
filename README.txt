@@ -7,6 +7,10 @@ Original-source ownership claims must not be attached to this new implementation
 Requirements: JDK 17+, POSIX shell. Tested locally using OpenJDK 23.0.2 with
 javac --release 17; no Maven, Gradle or external dependencies required.
 
+One-command narrated project demo: sh demo.sh
+Start with DELIVERY.txt and DEMO.txt for the integrated SQL/schema/partition/recovery
+flow, asserted outcomes, evidence locations and local-delivery boundaries.
+
 Explicit SQL COUNTER type: see SQL_COUNTER_VERIFICATION.txt for unified /sql
 DDL, INCREMENT and SELECT EVENTUAL usage and recovery semantics. This dialect
 requires fresh data directories and the same current binary on all peers;

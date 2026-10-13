@@ -1,0 +1,33 @@
+2026-10-13 main-checkout final verification
+Code HEAD: bbddc37 (includes be2e537 and 7ec86c7)
+Command: sh test.sh && sh demo.sh
+Log: /tmp/minisql-delivery-final.log
+Result: ALL_TESTS_PASSED and DEMO_PASSED.
+
+Legacy counter evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-10923491634992469525
+Typed SQL counter evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-6956910871398222071
+Raft rounds:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-2663063529590440120
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-12853808927020603971
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-13839779098613583820
+Demo transcript and durable state:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-7362170936346745886/demo-transcript.txt
+These are local temporary evidence locations; reruns generate new evidence.
+
+Coverage added this delivery:
+- /sql-counter/merge lost-ACK injection occurs after durable merge.
+- Sender sees pending=2 with one blocked destination and one ACK-dropping receiver.
+- Sender restart and same-origin retry preserve the original +4 result.
+- Healing yields exact 17 and pending=0 on all typed outboxes.
+- Demo creates ordinary metadata plus typed counter schema, rejects successful
+  no-quorum SQL reads, accepts isolated +7/+9/-3, restarts/retries, heals to 13,
+  restarts all nodes and validates unchanged metadata and counter values.
+
+Independent read-only review:
+Initial finding: aggregate pending!=0 did not isolate the lost-ACK destination.
+Fixed by bbddc37 (worker b2d0af6); reviewer confirmed finding closed and no remaining
+blocking finding in reviewed changes. Not a whole-system formal verification.
+git diff --check passed. Demo reports all spawned JVMs stopped.
+Scope: local delivery complete; production exclusions remain in DELIVERY.txt.
