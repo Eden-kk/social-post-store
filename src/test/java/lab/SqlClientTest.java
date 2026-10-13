@@ -118,6 +118,42 @@ public final class SqlClientTest {
         try { action.run(); throw new AssertionError("invalid input accepted"); }
         catch (IllegalArgumentException expected) { }
     }
+    private static void interruptedBackoffAndMalformedReply() throws Exception {
+        var replied = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        var outcome = new AtomicReference<Throwable>();
+        try (var server = new Server(e -> {
+            calls.incrementAndGet(); reply(e, 200, "not a terminal protocol response"); replied.countDown();
+        })) {
+            var client = new SqlClient(List.of(server.uri()), Duration.ofSeconds(1), Duration.ofSeconds(10));
+            var thread = new Thread(() -> {
+                try { client.execute("backoff", "SELECT * FROM t", Duration.ofSeconds(20)); }
+                catch (Throwable failure) { outcome.set(failure); }
+            });
+            thread.start();
+            try {
+                check(replied.await(2, TimeUnit.SECONDS), "no malformed reply");
+                long limit = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+                while (!inBackoff(thread) && System.nanoTime() < limit)
+                    Thread.sleep(5);
+                check(inBackoff(thread), "no bounded retry wait");
+                thread.interrupt(); thread.join(1000);
+                check(!thread.isAlive() && outcome.get() instanceof InterruptedException, "backoff interruption");
+                check(calls.get() == 1, "retried before backoff elapsed");
+            } finally { thread.interrupt(); thread.join(1000); }
+            Thread.currentThread().interrupt();
+            try {
+                client.execute("pre-interrupted", "SELECT * FROM t", DEADLINE);
+                throw new AssertionError("pre-interrupted request sent");
+            } catch (InterruptedException expected) {
+                check(calls.get() == 1, "pre-interrupted caller reached server");
+            } finally { Thread.interrupted(); }
+        }
+    }
+    private static boolean inBackoff(Thread thread) {
+        return Arrays.stream(thread.getStackTrace()).anyMatch(frame ->
+            frame.getClassName().equals("java.util.concurrent.TimeUnit") && frame.getMethodName().equals("sleep"));
+    }
     private static void validation() throws Exception {
         URI endpoint = URI.create("http://127.0.0.1:1");
         invalid(() -> new SqlClient(List.of(), ATTEMPT, BACKOFF));
@@ -140,6 +176,7 @@ public final class SqlClientTest {
     }
     public static void main(String[] args) throws Exception {
         validation(); lostResponseAndUnknown(); redirectAndErrors(); boundedFailures(); interruption();
+        interruptedBackoffAndMalformedReply();
         System.out.println("SqlClientTest passed");
     }
 }

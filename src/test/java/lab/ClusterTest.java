@@ -56,6 +56,12 @@ public final class ClusterTest implements AutoCloseable {
     private String sql(int id, String statement) throws Exception {
         return call(id, "/sql", statement, "test-"+(requestSequence++));
     }
+    private SqlClient failoverClient(int first) {
+        var endpoints = new ArrayList<URI>();
+        for (int offset = 0; offset < 3; offset++)
+            endpoints.add(URI.create("http://127.0.0.1:"+ports[(first+offset)%3]));
+        return new SqlClient(endpoints, Duration.ofSeconds(4), Duration.ofMillis(50));
+    }
     private static void expect(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -94,12 +100,14 @@ public final class ClusterTest implements AutoCloseable {
         System.out.println("PASS replicated CRUD and payload-bound duplicate retry");
         converge();
         stop(lead);
+        expect(failoverClient(lead).execute("increment-once", increment, Duration.ofSeconds(12))
+            .equals("OK UPDATE 1"), "client discovers replacement and retries committed request");
         var survivors = new HashSet<>(Set.of(0,1,2)); survivors.remove(lead);
         int replacement = leader(survivors);
         expect(call(replacement, "/sql", increment, "increment-once").equals("OK UPDATE 1"), "dedup after failover");
         expect(sql(replacement, "SELECT value FROM counters WHERE id = 1;").contains("[[1]]"), "failover value");
         start(lead); converge();
-        System.out.println("PASS abrupt leader kill, election, retry and restarted follower catch-up");
+        System.out.println("PASS client failover from dead leader, safe retry and restarted follower catch-up");
 
         // An isolated old leader may still believe it is leader, but cannot commit.
         lead = leader(Set.of(0,1,2));
@@ -109,8 +117,8 @@ public final class ClusterTest implements AutoCloseable {
         String unknown = call(lead, "/sql", increment, "partition-retry");
         expect(unknown.startsWith("UNKNOWN"), "minority write must not succeed: "+unknown);
         expect(sql(lead, "SELECT value FROM counters WHERE id = 1;").startsWith("UNKNOWN"), "minority strong read");
-        replacement = leader(survivors);
-        expect(call(replacement, "/sql", increment, "partition-retry").equals("OK UPDATE 1"), "majority write");
+        expect(failoverClient(lead).execute("partition-retry", increment, Duration.ofSeconds(12))
+            .equals("OK UPDATE 1"), "client leaves isolated leader and retries on majority");
         for (int i = 0; i < 3; i++) call(i, "/test/block", "", null);
         converge();
         lead = leader(Set.of(0,1,2));

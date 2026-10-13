@@ -57,7 +57,9 @@ public final class SqlClient {
             var pending = http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             try {
                 // Unlike a header-only timeout, this bounds receipt of the complete body too.
-                var response = pending.get(timeout, TimeUnit.NANOSECONDS);
+                remaining = budget - (System.nanoTime() - started);
+                if (remaining <= 0) throw new OutcomeUnknownException(lastFailure);
+                var response = pending.get(Math.min(timeout, remaining), TimeUnit.NANOSECONDS);
                 String result = response.body();
                 if (response.statusCode() == 200 && (result.startsWith("OK ") || result.startsWith("ERR ")))
                     return result;

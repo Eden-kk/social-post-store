@@ -50,3 +50,27 @@ three-JVM cluster rounds; ALL_TESTS_PASSED in:
 This binding is not a unique cluster UUID, membership migration, or authentication.
 Reusing all endpoints for a new logical cluster requires new directories. Exact URI
 matching intentionally rejects textual endpoint changes, including benign aliases.
+
+Client failover extension — 2026-10-12
+Added SqlClient with stable request ID/SQL retries, configured-peer rotation,
+per-attempt timeout, remaining total-deadline accounting, fixed retry delay,
+terminal OK/ERR handling and explicit unknown outcome after exhausted deadline.
+Focused local HTTP tests cover applied write with dropped response and dedup,
+UNKNOWN, stale NOT_LEADER hint, refused connection, HTTP503, stalled response
+body, malformed HTTP200 response, interruption in-flight/in-backoff/pre-call,
+and input validation. These simulated dropped-response tests do not simulate
+a real Raft cluster losing a committed write response.
+ClusterTest separately exercises client entry via a killed leader and via an
+isolated old leader; retries preserve the committed/uncertain request identity
+and final counter values prove no duplicate effect in those scenarios.
+Final exact-source sh test.sh: SQL/storage/identity/client units and all three
+cluster rounds passed, ALL_TESTS_PASSED. Evidence directories:
+  /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-17359819445557129043
+  /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-633734177360117650
+  /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-13428562815627633482
+Independent read-only client review found no blockers after deadline-accounting
+and interruption-test refinements. No throughput or latency benchmark claims.
+Deadline uses bounded waits, not real-time scheduling guarantees; cancellation
+cannot retract server work. Caller owns stable IDs across process restarts.
+HTTP only, configured trusted endpoints, no durable client outbox, jitter,
+adaptive backoff, response-size bound or exactly-once delivery guarantee.

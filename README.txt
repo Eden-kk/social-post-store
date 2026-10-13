@@ -34,6 +34,23 @@ NOT_LEADER gives the last known leader ID; recheck status because hints can be o
 UNKNOWN means timeout/leadership change, not proof of failure; retry SAME ID/SQL.
 HTTP200 is transport completion only: inspect OK/ERR/UNKNOWN/NOT_LEADER in body.
 
+Java failover client
+SqlClient accepts a list of configured peer origins and rotates through them on
+transport failure, UNKNOWN or NOT_LEADER. It does not follow arbitrary URLs or
+assume a numeric leader hint is an endpoint-list index. Example:
+  var client = new SqlClient(List.of(URI.create("http://127.0.0.1:19100"),
+      URI.create("http://127.0.0.1:19101"), URI.create("http://127.0.0.1:19102")),
+      Duration.ofSeconds(4), Duration.ofMillis(50));
+  String result = client.execute("add-1",
+      "UPDATE accounts SET balance = balance + 5 WHERE id = 1;", Duration.ofSeconds(12));
+The same request ID and exact SQL are preserved across retries. OK and SQL ERR
+are terminal outcomes. An OutcomeUnknownException after the total deadline does
+NOT prove a write failed; any caller-level retry must retain the original ID/SQL.
+Each attempt and retry wait share the remaining overall deadline. Interruption
+cancels the client wait but cannot undo a write already accepted by the server.
+This is a bounded retry client, not a guarantee of eventual completion or
+end-to-end exactly-once delivery. Fresh reads need fresh IDs as described above.
+
 SQL scope
 LONG/TEXT, exactly one inline PRIMARY KEY, CREATE TABLE; positional INSERT;
 SELECT * or projection, optional primary-key equality WHERE; single-column
