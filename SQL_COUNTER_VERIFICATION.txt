@@ -70,3 +70,13 @@ Raft round evidence:
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-9507522158604156115
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-17417917622587072538
 /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-10943300738550090606
+
+Main checkout verification after integration: sh test.sh -> ALL_TESTS_PASSED.
+Typed SQL evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-7585297852242875663
+Legacy CRDT evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-3745761793789491302
+Raft evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-1638745682072642629
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-2337502844470577165
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-10943956798926328641
