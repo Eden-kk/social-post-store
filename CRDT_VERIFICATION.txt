@@ -1,0 +1,72 @@
+Independent CRDT counter extension — 2026-10-12
+
+Scope
+Raft SQL remains majority committed. A separate PN-counter namespace permits
+origin-local signed increments/decrements during logical partitions. It does not
+merge arbitrary SQL writes, offer cross-mode transactions or enforce nonnegative
+balances. The process remains loopback only and untrusted callers are unsupported.
+
+API
+GET /counter/status -> origin=<node-id>:<incarnation-UUID>, pending peer count,
+lastFailure (historical last replication failure, not a current-health assertion).
+POST /counter/add with X-Counter-Origin=<exact origin> and X-Request-ID=<stable ID>
+and body consisting of key, newline, signed long delta. Response LOCAL_DURABLE
+means one local forced/atomically replaced copy, never remote durability/quorum.
+Retry same ID, payload and origin. Do not route one logical increment to another
+origin; wrong-origin retries reject. Duplicate retries return the original local
+result, not necessarily today's aggregate. POST /counter/read with key as body
+returns an eventual, potentially stale local value. There is no reset/delete/set.
+
+Mechanism
+Each key retains nonnegative P/N components per incarnation. Receiver merges
+componentwise max, never adds delta messages. Aggregate arithmetic is BigInteger;
+individual long component overflow rejects before state mutation. The same
+atomic file includes state, local request/result dedup and per-peer acknowledged
+version. Snapshot versions newer than an ACK remain pending. Full-state messages
+coalesce pending work; this is a durable local outbox, NOT an external MQ broker.
+Receiver acknowledges only after durable merge. Immediate sends have bounded
+timeouts, and background full-state anti-entropy runs even when pending is zero.
+Incoming advancement of the current local incarnation fails closed as stale or
+cloned identity; missing identity/state pairing is rejected. Entirely new data
+directory generates a fresh incarnation; never copy a live identity to a writer.
+
+Bounds and limitations
+Fixed three peers; no dynamic membership, auth/TLS, Kafka, physical cross-region
+deployment or production fault-tolerance claim. Individual wire snapshots capped
+at 900,000 bytes; global union must remain within that bound. If a merge exceeds
+it, the receiver fails closed without ACK; capacity exhaustion is NOT covered by
+convergence guarantees. Max 100,000 retained local request IDs; no garbage
+collection. Whole-state fsync/replace per mutation is deliberately non-scalable.
+Full site/disk loss before remote delivery may lose acknowledged local writes.
+Restore of an old snapshot under a reused incarnation is unsafe and unsupported.
+Eventual convergence assumes bounded state, updates stop and delivery resumes.
+
+Verification commands
+sh build.sh
+java -cp build/classes lab.CounterTest
+java -cp build/classes lab.CounterClusterTest
+sh test.sh  # also runs existing Raft/SQL/client regression suite
+
+Focused checks passed
+COUNTER_TEST_PASSED: merge associativity/commutativity/idempotence, older snapshots,
+signed and independent-key arithmetic, BigInteger totals/component overflow,
+same-origin result replay/payload mismatch, cross-origin rejection, exclusive
+directory lock, persistent dedup/pending state, delayed old ACK retaining newer
+state, incarnation stability/renewal, cloned-origin rejection, identity mismatch,
+corruption and missing state. Filesystem write failure test also fails closed.
+COUNTER_CLUSTER_TEST_PASSED: three real JVMs, all isolated sites accept independent
+counter writes while isolated SQL cannot confirm commit; kill/restart before
+delivery, heal, exact expected total13; receiver persists with ACK intentionally
+dropped, sender kill/restart/replay, exact total17; duplicate retry and full restart.
+Evidence: /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-10430654694079775369
+No claim of physical power-loss or real datacenter testing.
+
+Final regression: sh test.sh returned ALL_TESTS_PASSED, including existing
+SqlEngineTest, DurableStateTest, IdentityTest, SqlClientTest and all three
+Raft ClusterTest rounds. Focused counter tests were rerun after expanding the
+test-only assertions, both passed. New cluster evidence directory:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-9989286767887088505
+Additional assertions: pending outboxes drain, replace one counter directory
+with a fresh incarnation after drain and recover via periodic anti-entropy,
+reject retired-origin retries, compare exact persisted components on all peers.
+Malformed snapshot and simulated filesystem write failure also rejected.
