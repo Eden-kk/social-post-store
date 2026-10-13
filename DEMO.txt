@@ -1,0 +1,32 @@
+Distributed MiniSQL: local closed-loop demonstration
+
+Prerequisites: JDK 17 or newer; sh; available local loopback ports. No third-party
+dependencies, cloud account, external service or credentials required.
+
+Run from this checkout: sh demo.sh
+Run the broader correctness regression separately: sh test.sh
+
+The demo compiles sources, starts three temporary Java processes and prints actual
+HTTP/SQL results. It commits post metadata and a COUNTER schema, partitions all
+nodes, verifies ordinary SQL cannot acknowledge success without a quorum, accepts
+three local increments, crashes/restarts a sender, retries the identical origin-
+bound request, heals to exactly 13, and restarts every process before rechecking
+metadata and values. Every checkpoint is asserted; failure exits nonzero.
+
+EVIDENCE_DIR contains node logs, durable files and demo-transcript.txt. Each run
+uses fresh data and ports; existing user data is not touched. Child JVMs are stopped
+on normal success or handled exception. Hard-killing the demo JVM can bypass Java
+cleanup; inspect its recorded logs/processes before manually restarting. Port
+reservation has a small release-to-bind race; startup fails rather than falling
+back to an unrelated service. Evidence is retained for inspection, not auto-deleted.
+
+This is one application flow through /sql, with explicit per-operation consistency:
+ordinary SQL and schema use Raft; typed counters use local durable acceptance and
+eventual merging. It is not an atomic SQL-plus-counter transaction. A shared post
+key is an application convention, not referential integrity. Failure tests simulate
+network partitions between local processes, not deployment in real datacenters.
+
+LOCAL_DURABLE does not survive permanent loss of the sole copy before replication.
+No unrestricted SQL/joins, snapshots, membership changes, TLS/authentication or
+production capacity claim. See SQL_COUNTER_VERIFICATION.txt for exact bounds and
+fresh-directory-only SQL dialect compatibility.
