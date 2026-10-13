@@ -41,11 +41,21 @@ public final class SqlCounterClusterTest {
             t.stop(0);t.start(0);t.isolate(0);
             SqlCounterTest.check(sql(t,0,"a",commands[0],origin[0]).equals(first),"restart pinned retry");
             t.heal();for(int i=0;i<3;i++)awaitValue(t,i,"13");
+            t.call(1,"/test/sql-counter-drop-ack","true",null,null);
+            t.call(0,"/test/block","2",null,null);t.isolate(2);
+            String ackLost=sql(t,0,"lost-ack","INCREMENT metrics.value BY 4 WHERE id='post'",origin[0]);
+            SqlCounterTest.check(ackLost.startsWith("LOCAL_DURABLE"),"lost ACK local acceptance");
+            awaitValue(t,1,"17");
+            SqlCounterTest.check(!t.call(0,"/sql-counter/status",null,null,null).body().contains("pending=0\n"),"unacknowledged outbox retained");
+            t.stop(0);t.start(0);
+            SqlCounterTest.check(sql(t,0,"lost-ack","INCREMENT metrics.value BY 4 WHERE id='post'",origin[0]).equals(ackLost),"lost ACK restart retry");
+            t.call(1,"/test/sql-counter-drop-ack","false",null,null);t.heal();
+            for(int i=0;i<3;i++)awaitValue(t,i,"17");
             for(String statement:new String[]{"SELECT * FROM metrics","INSERT INTO metrics VALUES ('post',9)","UPDATE metrics SET value=9 WHERE id='post'","DELETE FROM metrics WHERE id='post'"})
                 SqlCounterTest.check(client.execute(java.util.UUID.randomUUID().toString(),statement,Duration.ofSeconds(12)).startsWith("ERR"),"normal SQL blocked");
             for(int i=0;i<3;i++)t.stop(i);for(int i=0;i<3;i++)t.start(i);
-            for(int i=0;i<3;i++)awaitValue(t,i,"13");
-            System.out.println("PASS Raft DDL, lagging-schema rejection, sparse zero, partition writes, namespace isolation, origin/payload checks, restart replay, exact convergence");
+            for(int i=0;i<3;i++)awaitValue(t,i,"17");
+            System.out.println("PASS Raft DDL, lagging-schema rejection, sparse zero, partition writes, namespace isolation, origin/payload checks, lost-ACK restart retry, exact convergence");
             System.out.println("SQL_COUNTER_CLUSTER_TEST_PASSED");
         }
     }

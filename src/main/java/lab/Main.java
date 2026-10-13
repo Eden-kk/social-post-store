@@ -41,7 +41,10 @@ public final class Main {
                     byte[] body = exchange.getRequestBody().readNBytes(1_048_577);
                     if (body.length > 1_048_576) throw new IllegalArgumentException("body too large");
                     switch (path) {
-                        case "/sql-counter/merge" -> response = sqlCounter.receive(Integer.parseInt(exchange.getRequestHeaders().getFirst("X-Counter-Peer")), body);
+                        case "/sql-counter/merge" -> {
+                            response = sqlCounter.receive(Integer.parseInt(exchange.getRequestHeaders().getFirst("X-Counter-Peer")), body);
+                            if (sqlCounter.droppingAck()) { exchange.close(); return; }
+                        }
                         case "/counter/add" -> response = counter.add(exchange.getRequestHeaders().getFirst("X-Counter-Origin"),
                             exchange.getRequestHeaders().getFirst("X-Request-ID"), new String(body, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
                         case "/counter/read" -> response = counter.value(new String(body, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
@@ -52,6 +55,10 @@ public final class Main {
                         case "/test/counter-drop-ack" -> {
                             if (args.length != 4 || !args[3].equals("--test-controls")) {send(exchange, 404, new byte[0]); return;}
                             counter.dropAck(new String(body, StandardCharsets.UTF_8).equals("true")); response = "OK".getBytes();
+                        }
+                        case "/test/sql-counter-drop-ack" -> {
+                            if (args.length != 4 || !args[3].equals("--test-controls")) {send(exchange, 404, new byte[0]); return;}
+                            sqlCounter.dropAck(new String(body, StandardCharsets.UTF_8).equals("true")); response = "OK".getBytes();
                         }
                         case "/raft/vote" -> {
                             var reply = node.vote(readVote(body));
