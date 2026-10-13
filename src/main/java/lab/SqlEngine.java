@@ -9,7 +9,7 @@ import java.util.TreeMap;
 
 /**
  * In-memory deterministic, single-statement SQL subset (keywords ignore case):
- * CREATE TABLE name (column LONG|TEXT [PRIMARY KEY], ...)
+ * CREATE TABLE name (column LONG|TEXT|COUNTER [PRIMARY KEY], ...)
  * INSERT INTO name VALUES (literal, ...)
  * SELECT *|column[, ...] FROM name [WHERE primary_key = literal]
  * UPDATE name SET non_key_column = literal WHERE primary_key = literal
@@ -104,7 +104,7 @@ public final class SqlEngine {
             if (p.take("LONG")) type = Type.LONG;
             else if (p.take("TEXT")) type = Type.TEXT;
             else if (p.take("COUNTER")) type = Type.COUNTER;
-            else throw new SqlError("expected LONG or TEXT");
+            else throw new SqlError("expected LONG, TEXT or COUNTER");
             if (p.take("PRIMARY")) {
                 p.require("KEY");
                 if (key != -1) throw new SqlError("multiple primary keys");
@@ -132,8 +132,10 @@ public final class SqlEngine {
     }
 
     public static boolean isCounterStatement(String sql) {
-        Parser p = new Parser(sql);
-        return p.take("INCREMENT") || (p.take("SELECT") && p.take("EVENTUAL"));
+        try {
+            Parser p = new Parser(sql);
+            return p.take("INCREMENT") || (p.take("SELECT") && p.take("EVENTUAL"));
+        } catch (SqlError e) { return false; }
     }
 
     /** Resolves only immutable schema already applied from the committed Raft log. */

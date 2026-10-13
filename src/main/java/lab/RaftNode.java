@@ -33,6 +33,7 @@ public final class RaftNode implements AutoCloseable {
         this.id = id; this.peers = Map.copyOf(peers); storage = new DurableState(directory);
         try {
             storage.bindIdentity(id, this.peers);
+            storage.bindSqlDialect();
             var state = storage.load(); term = state.term(); votedFor = state.votedFor();
             committed = state.committed(); log.add(new Entry(0, "", "")); log.addAll(state.entries());
             applyCommitted(); resetElection();

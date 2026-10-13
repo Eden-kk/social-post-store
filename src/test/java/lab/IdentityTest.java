@@ -53,6 +53,15 @@ public final class IdentityTest {
         }
         rejected(0, PEERS, legacy, "no identity");
         if (Files.exists(legacy.resolve("identity.bin"))) throw new AssertionError("legacy rebound");
+        Path oldDialect = Files.createTempDirectory("minisql-old-dialect-");
+        try (var store = new DurableState(oldDialect)) {
+            store.bindIdentity(0, PEERS);
+            store.save(new DurableState.State(1, 0, 1, List.of(new Protocol.Entry(1, "old-rejected", "CREATE TABLE t(id LONG PRIMARY KEY,c COUNTER)"))));
+        }
+        rejected(0, PEERS, oldDialect, "legacy SQL dialect");
+        if (Files.exists(oldDialect.resolve("sql-dialect.bin"))) throw new AssertionError("legacy dialect rebound");
+        Files.write(directory.resolve("sql-dialect.bin"), new byte[]{0});
+        rejected(0, PEERS, directory, "SQL dialect mismatch");
         System.out.println("IdentityTest passed; evidence=" + directory + "; legacy=" + legacy);
     }
 }

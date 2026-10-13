@@ -7,6 +7,11 @@ Original-source ownership claims must not be attached to this new implementation
 Requirements: JDK 17+, POSIX shell. Tested locally using OpenJDK 23.0.2 with
 javac --release 17; no Maven, Gradle or external dependencies required.
 
+Explicit SQL COUNTER type: see SQL_COUNTER_VERIFICATION.txt for unified /sql
+DDL, INCREMENT and SELECT EVENTUAL usage and recovery semantics. This dialect
+requires fresh data directories and the same current binary on all peers;
+legacy logs are refused, not silently reinterpreted. No rolling upgrade.
+
 Run all tests:
   sh test.sh
 It compiles source, runs SQL/storage tests, then repeats a real three-JVM HTTP

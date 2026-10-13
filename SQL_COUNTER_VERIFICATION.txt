@@ -1,0 +1,72 @@
+SQL COUNTER type integration — 2026-10-12
+
+Contract
+CREATE TABLE metrics (id TEXT PRIMARY KEY, value COUNTER)
+is an ordinary Raft request: quorum commit, durable log, deterministic schema
+replay. Exactly two columns are supported: a LONG/TEXT primary key and a
+COUNTER. Schema is immutable; no DROP, ALTER, reset, deletion or mixed rows.
+
+The same POST /sql endpoint accepts explicit operation semantics:
+  INCREMENT metrics.value BY 7 WHERE id='post'
+  SELECT EVENTUAL value FROM metrics WHERE id='post'
+Both require X-Request-ID. INCREMENT additionally requires X-Counter-Origin,
+obtained from GET /sql-counter/status on that same replica. Retry the same
+logical increment ONLY against that origin/incarnation with the same ID and
+semantic payload. SqlClient rejects both operations rather than failing over.
+Equivalent lexical forms of the same key/delta are the same semantic payload.
+
+Only locally applied committed schema authorizes these operations. A lagging
+replica without the DDL rejects rather than implicitly creating schema. Since
+DDL cannot change or drop this table, no cross-store atomic DDL transaction is
+needed. Ordinary INSERT/UPDATE/DELETE/SELECT on a COUNTER table return ERR.
+Ordinary LONG/TEXT tables still use Raft; there is no automatic downgrade.
+
+COUNTER keys are sparse: every valid primary-key value reads zero until first
+increment. This does not mean an entity row exists; there are no foreign keys,
+cross-table transactions or entity-deletion guarantees. SELECT EVENTUAL is a
+local read, may be stale and is not read through Raft or cached by request ID.
+LOCAL_DURABLE confirms one durable local copy, not quorum/remote durability.
+Permanent loss of that copy before replication may lose acknowledged writes.
+
+Storage and recovery
+SQL counters use their own sql-counter directory, origin, dedup map and
+/sql-counter/merge transport, separate from legacy /counter/add/read. Canonical
+length-framed (table,column,keytype,key) tuples are SHA-256-addressed. Collision
+resistance is cryptographic, not a mathematical uniqueness guarantee. Thus
+guessing that key via the legacy counter API cannot affect a SQL counter.
+PN-state outbox/replay, max-merge, anti-entropy and durable origin-bound dedup
+reuse the tested counter implementation. Raft replay applies schema only,
+never CRDT increments; merged counter data can arrive before the local schema
+but is not exposed through SQL until that schema is committed/applied.
+
+Compatibility boundary
+This dialect requires FRESH DATA DIRECTORIES on all three nodes. A durable
+sql-dialect.bin marker is created before any new log. Existing state without
+the marker or a mismatching marker refuses startup, preventing old rejected
+COUNTER DDL from becoming successful on replay. No automatic migration,
+mixed-version clusters, rolling upgrade or old-binary rollback is supported.
+Do not add a marker manually to existing data.
+
+Tests
+SqlCounterTest checks schema restrictions, ordinary DML protection, quoted text,
+signed deltas, canonical numeric keys, bad columns/predicates/types, trailing
+operations, and Raft SqlClient rejection of origin-pinned commands.
+SqlCounterClusterTest runs three real local JVMs: commits schema with one
+replica partitioned, rejects a write on its stale schema, heals schema, then
+isolates all replicas and accepts +7/+9/-3. It verifies zero defaults,
+cross-origin/payload rejection, legacy namespace isolation, restart dedup,
+healing to exact 13 and full-restart recovery, plus normal DML rejection.
+IdentityTest checks refusal of old logs containing formerly rejected COUNTER DDL.
+This is logical partition testing on one host, NOT physical cross-datacenter,
+power-loss, production broker or throughput validation.
+
+Run: sh test.sh
+Final full suite: ALL_TESTS_PASSED, /tmp/sql-counter-final.log.
+Includes SQL, durable storage, identity/dialect, SQL client, PN counter unit,
+legacy counter real-process, SQL counter unit/real-process, three Raft rounds.
+SQL counter real-process evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-5331927538705725079
+Raft round evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-9507522158604156115
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-17417917622587072538
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-10943300738550090606

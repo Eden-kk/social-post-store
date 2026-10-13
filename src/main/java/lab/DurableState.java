@@ -49,6 +49,17 @@ public final class DurableState implements AutoCloseable {
         try { return MessageDigest.getInstance("SHA-256").digest(data); }
         catch (Exception e) { throw new IllegalStateException(e); }
     }
+    public void bindSqlDialect() throws IOException {
+        byte[] dialect = "minisql-counter-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Path path = directory.resolve("sql-dialect.bin");
+        if (Files.exists(path)) {
+            if (!Arrays.equals(Files.readAllBytes(path), dialect)) throw new IOException("SQL dialect mismatch");
+        } else {
+            // Formerly rejected statements must never become successful when an old log replays.
+            if (Files.exists(directory.resolve("state.bin"))) throw new IOException("legacy SQL dialect; fresh data directory required");
+            writeAtomic("sql-dialect.bin", dialect);
+        }
+    }
     public State load() throws IOException {
         Path path = directory.resolve("state.bin");
         if (!Files.exists(path)) return new State(0, -1, 0, List.of());

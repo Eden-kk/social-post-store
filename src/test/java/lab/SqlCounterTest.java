@@ -8,6 +8,8 @@ public final class SqlCounterTest {
     }
     public static void main(String[] args) throws Exception {
         var db = new SqlEngine();
+        check(!SqlEngine.isCounterStatement("SELECT 'unterminated"), "malformed ordinary SQL keeps Raft error path");
+        check(db.execute("SELECT 'unterminated").startsWith("ERR"), "stable malformed SQL error");
         check(db.execute("CREATE TABLE bad(id COUNTER PRIMARY KEY,c LONG)").startsWith("ERR"), "counter PK");
         check(db.execute("CREATE TABLE bad(id LONG PRIMARY KEY,c COUNTER,x TEXT)").startsWith("ERR"), "mixed");
         check(db.execute("CREATE TABLE metrics(id TEXT PRIMARY KEY,value COUNTER)").equals("OK CREATE"), "ddl");
