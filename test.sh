@@ -5,6 +5,7 @@ sh build.sh
 java -cp build/classes lab.SqlEngineTest
 java -cp build/classes lab.DurableStateTest
 java -cp build/classes lab.IdentityTest
+java -cp build/classes lab.SqlClientTest
 for round in 1 2 3; do
     echo "CLUSTER_ROUND=$round"
     java -cp build/classes lab.ClusterTest
