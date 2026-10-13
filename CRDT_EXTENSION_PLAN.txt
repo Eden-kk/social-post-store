@@ -1,0 +1,79 @@
+Partition-available counter extension — implemented and scenario-tested
+2026-10-12
+
+Motivation
+User described their team's Counter 2.0 as using CRDT, cross-datacenter replay
+and asynchronous message-queue writes during synchronous write unavailability.
+This is team background, not a claim that the user implemented Counter 2.0.
+Existing project has Raft SQL and bounded failover retries, not this extension.
+
+Decision approved by user; implemented in commit 8a1d7b5
+Implement a distinct CRDT counter API alongside Raft SQL. Arbitrary SQL statements
+cannot be made partition-writable by replay alone: UPDATE/DELETE, uniqueness,
+transactions and ordering constraints need different conflict semantics.
+Do not allow minority SQL writes or merge conflicting Raft logs independently.
+
+Implemented scope (API and test evidence: CRDT_VERIFICATION.txt)
+1. Separate namespace/API for signed counter increments; no SET/reset/delete.
+   PN-counter keeps nonnegative P/N components per stable replica incarnation.
+   Merge uses component-wise max; value is sum(P)-sum(N), never max(total).
+   Use checked arithmetic/explicit overflow rejection; no negative balance guard.
+2. Locally durable acceptance: increment, request identity/result and outgoing
+   component state persisted together before acknowledging LOCAL_DURABLE.
+   Disk failure rejects acceptance. Network isolation alone does not reject it.
+   This acknowledges one durable local copy, NOT remote durability or quorum.
+3. Attempt synchronous peer delivery with a finite timeout. If unavailable,
+   retain a durable per-peer outbox for background at-least-once replay.
+   First implementation can use a local persistent outbox, explicitly not Kafka
+   or an independently replicated message broker. Full site/disk loss before
+   remote delivery can still lose a locally acknowledged write.
+4. Transmit cumulative origin component states, not blind increment events.
+   Duplicate/reordered delivery is idempotent under max merge. Acknowledge only
+   after receiver durable merge; clear pending delivery only after that ACK.
+   A lost ACK causes harmless replay. Background anti-entropy heals missed state.
+5. Stable replica identity and filesystem lock prevent concurrent component
+   writers. Restart preserves identity and monotonic components. Lost state
+   requires a new incarnation, never reusing a reset component ID.
+
+Chosen application retry contract: origin-bound requests
+CRDT merge idempotence is NOT deduplication of a client's increment accepted
+independently at two replicas. Repeating one request ID at two partitioned
+origins can otherwise count twice. Initial API should bind a command to its
+origin: retry same origin/ID/payload, do not fail over one logical write to a
+new origin. Reject mismatches. Alternate designs require globally stable event
+identities/event-set union and unbounded retention, or coordination; choose
+explicitly rather than claim exactly-once from PN-counter alone.
+
+Recovery sequence
+Restore local committed state -> recover pending outbox -> resume retries ->
+merge received component snapshots durably -> exchange anti-entropy snapshots ->
+verify all replicas reach equal components/value after updates stop and delivery
+resumes. No convergence time bound while partitions/delivery failures persist.
+Raft and CRDT stores must not silently mutate the same SQL rows; no cross-mode
+atomic transactions or automatic eventual-to-strong consistency transition.
+
+Acceptance scenarios (completed; see CRDT_VERIFICATION.txt for evidence)
+- Merge associativity, commutativity, idempotence with shuffled/duplicate states.
+- Isolate every replica; distinct origin writes continue locally; Raft minority
+  writes remain unable to commit. Heal and assert exact sum, not mere equality.
+- Signed increments/decrements and multi-key independence.
+- Crash after local acceptance before send; restart and replay outbox.
+- Receiver persists but ACK is lost; replay changes no count.
+- Same-origin repeated ID and changed payload; reject cross-origin retries under
+  declared contract. Distinguish this from legitimate concurrent origin writes.
+- Old snapshot after newer snapshot; identity mismatch; corruption; overflow.
+- Three real processes representing logical sites, restart during partition,
+  heal and converge; this is not a physical multi-datacenter deployment test.
+
+References
+Raft majority/availability: https://raft.github.io/raft.pdf
+PN-counter reference: https://concordant.gitlabpages.inria.fr/software/c-crdtlib/c-crdtlib/crdtlib.crdt/-p-n-counter/index.html
+
+Resume boundary
+Current multi-node wording is general but implementation is still fixed three
+peers; no dynamic membership claimed. CRDT/outbox/replay/convergence bullets may
+describe the verified logical-partition tests, not physical multi-datacenter
+deployment. Keep production Counter 2.0 background separate from this work.
+Capacity is bounded: 900,000-byte global CRDT snapshot and 100,000 local request
+IDs. Exceeding the merged-state bound can prevent convergence and needs operator
+intervention. The outbox is coalesced persistent state, not an external MQ broker.

@@ -51,6 +51,22 @@ cancels the client wait but cannot undo a write already accepted by the server.
 This is a bounded retry client, not a guarantee of eventual completion or
 end-to-end exactly-once delivery. Fresh reads need fresh IDs as described above.
 
+Partition-available counters
+An independent PN-counter API now runs alongside Raft SQL. SQL still needs a
+majority; counter writes acknowledge LOCAL_DURABLE after local persistence and
+converge after logical partitions heal. This is not arbitrary SQL conflict merge.
+See CRDT_VERIFICATION.txt for API, fault tests, replay semantics and capacity limits.
+With the demo processes above running:
+  curl http://127.0.0.1:19100/counter/status
+Copy its exact origin value (including UUID) into the request below:
+  curl -H 'X-Counter-Origin: <origin>' -H 'X-Request-ID: count-1' --data-binary 'visits
+5' http://127.0.0.1:19100/counter/add
+  curl --data-binary 'visits' http://127.0.0.1:19101/counter/read
+The second node may initially be stale; background replay/anti-entropy propagates
+state. Retry the same request only on its original incarnation, with the same ID
+and payload. Do NOT use SqlClient failover for counter requests. Replay coalesces
+cumulative components in a durable local outbox, not a Kafka/MQ deployment.
+
 SQL scope
 LONG/TEXT, exactly one inline PRIMARY KEY, CREATE TABLE; positional INSERT;
 SELECT * or projection, optional primary-key equality WHERE; single-column

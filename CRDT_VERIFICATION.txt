@@ -70,3 +70,12 @@ Additional assertions: pending outboxes drain, replace one counter directory
 with a fresh incarnation after drain and recover via periodic anti-entropy,
 reject retired-origin retries, compare exact persisted components on all peers.
 Malformed snapshot and simulated filesystem write failure also rejected.
+
+Main-checkout confirmation after integration (8a1d7b5)
+sh test.sh completed with ALL_TESTS_PASSED, including the expanded counter test.
+Counter evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-14903206417891067793
+Raft evidence, three rounds:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-5665743019355352713
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-4769804565956457494
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-11527647511073298011
