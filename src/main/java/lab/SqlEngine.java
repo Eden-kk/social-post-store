@@ -30,7 +30,17 @@ import java.util.TreeMap;
  * This class has no persistence; replay the committed log into a fresh instance.
  */
 public final class SqlEngine {
-    private enum Type { LONG, TEXT }
+    private enum Type { LONG, TEXT, COUNTER }
+    public record CounterCommand(String table, String column, String keyType, Object key, Long delta) {
+        public String storageKey() {
+            try {
+                var bytes = new java.io.ByteArrayOutputStream();
+                var out = new java.io.DataOutputStream(bytes);
+                out.writeUTF(table); out.writeUTF(column); out.writeUTF(keyType); out.writeUTF(key.toString());
+                return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray()));
+            } catch (java.io.IOException | java.security.NoSuchAlgorithmException e) { throw new IllegalArgumentException("invalid counter key", e); }
+        }
+    }
     private record Column(String name, Type type) {}
     private record Token(String value, boolean quoted) {}
     private static final class SqlError extends RuntimeException {
@@ -93,6 +103,7 @@ public final class SqlEngine {
             Type type;
             if (p.take("LONG")) type = Type.LONG;
             else if (p.take("TEXT")) type = Type.TEXT;
+            else if (p.take("COUNTER")) type = Type.COUNTER;
             else throw new SqlError("expected LONG or TEXT");
             if (p.take("PRIMARY")) {
                 p.require("KEY");
@@ -104,6 +115,9 @@ public final class SqlEngine {
         p.require(")");
         p.end();
         if (key == -1) throw new SqlError("primary key required");
+        if (columns.stream().anyMatch(c -> c.type() == Type.COUNTER)
+                && (columns.size() != 2 || columns.get(key).type() == Type.COUNTER))
+            throw new SqlError("COUNTER table requires exactly one LONG/TEXT primary key and one COUNTER");
         tables.put(name, new Table(columns, key));
         return "OK CREATE";
     }
@@ -112,7 +126,36 @@ public final class SqlEngine {
         String name = p.identifier();
         Table table = tables.get(name);
         if (table == null) throw new SqlError("unknown table " + name);
+        if (table.columns.stream().anyMatch(c -> c.type() == Type.COUNTER))
+            throw new SqlError("COUNTER table requires INCREMENT or SELECT EVENTUAL");
         return table;
+    }
+
+    public static boolean isCounterStatement(String sql) {
+        Parser p = new Parser(sql);
+        return p.take("INCREMENT") || (p.take("SELECT") && p.take("EVENTUAL"));
+    }
+
+    /** Resolves only immutable schema already applied from the committed Raft log. */
+    public synchronized CounterCommand counterCommand(String sql) {
+        try {
+            Parser p = new Parser(sql);
+            boolean add = p.take("INCREMENT");
+            String name, column; Long delta = null;
+            if (add) {
+                name = p.identifier(); p.require("."); column = p.identifier();
+                p.require("BY"); delta = (Long) p.literal(Type.LONG);
+            } else {
+                p.require("SELECT"); p.require("EVENTUAL"); column = p.identifier();
+                p.require("FROM"); name = p.identifier();
+            }
+            Table table = tables.get(name);
+            if (table == null) throw new SqlError("unknown locally applied table " + name);
+            if (table.columns.get(table.column(column)).type() != Type.COUNTER)
+                throw new SqlError("column is not COUNTER");
+            Object key = where(p, table); p.end();
+            return new CounterCommand(name, column, table.columns.get(table.key).type().name(), key, delta);
+        } catch (SqlError | NumberFormatException e) { throw new IllegalArgumentException(e.getMessage(), e); }
     }
 
     private String insert(Parser p) {
@@ -249,13 +292,13 @@ public final class SqlEngine {
                     }
                     if (!closed) throw new SqlError("unterminated string");
                     tokens.add(new Token(value.toString(), true));
-                } else if ("(),=*;+".indexOf(c) >= 0) {
+                } else if ("(),=*;+.".indexOf(c) >= 0) {
                     tokens.add(new Token(String.valueOf(c), false));
                     i++;
                 } else {
                     int start = i++;
                     while (i < sql.length() && !Character.isWhitespace(sql.charAt(i))
-                            && "(),=*;+'".indexOf(sql.charAt(i)) < 0) i++;
+                            && "(),=*;+.'".indexOf(sql.charAt(i)) < 0) i++;
                     tokens.add(new Token(sql.substring(start, i), false));
                 }
             }

@@ -36,6 +36,8 @@ public final class SqlClient {
     public String execute(String requestId, String sql, Duration deadline)
             throws IOException, InterruptedException {
         long budget = nanos(deadline, false);
+        if (sql != null && SqlEngine.isCounterStatement(sql))
+            throw new IllegalArgumentException("COUNTER operations require an origin-pinned request, not Raft failover");
         if (requestId == null || requestId.isBlank() || requestId.length() > 128
                 || !requestId.equals(requestId.strip())
                 || requestId.chars().anyMatch(c -> c < 33 || c > 126)

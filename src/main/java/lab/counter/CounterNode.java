@@ -13,12 +13,17 @@ public final class CounterNode implements AutoCloseable {
     private final int id;
     private final Map<Integer, URI> peers;
     private final CounterStore store;
+    private final String mergePath;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(200)).build();
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private volatile Set<Integer> blocked = Set.of();
     private volatile boolean dropAck;
     private volatile String lastError = "none";
     public CounterNode(int id, Map<Integer, URI> peers, Path directory) throws IOException {
+        this(id, peers, directory, "/counter/merge");
+    }
+    public CounterNode(int id, Map<Integer, URI> peers, Path directory, String mergePath) throws IOException {
+        this.mergePath = mergePath;
         this.id = id; this.peers = Map.copyOf(peers); store = new CounterStore(directory, id, peers);
     }
     public void start() { worker.scheduleWithFixedDelay(this::replicate, 200, 300, TimeUnit.MILLISECONDS); }
@@ -47,7 +52,7 @@ public final class CounterNode implements AutoCloseable {
                 if (peer.getKey() == id || blocked.contains(peer.getKey())) continue;
                 CompletableFuture<HttpResponse<String>> pending = null;
                 try {
-                    var request = HttpRequest.newBuilder(peer.getValue().resolve("/counter/merge"))
+                    var request = HttpRequest.newBuilder(peer.getValue().resolve(mergePath))
                         .timeout(Duration.ofMillis(400)).header("X-Counter-Peer", "" + id)
                         .POST(HttpRequest.BodyPublishers.ofByteArray(buffer.toByteArray())).build();
                     pending = client.sendAsync(request, HttpResponse.BodyHandlers.ofString());

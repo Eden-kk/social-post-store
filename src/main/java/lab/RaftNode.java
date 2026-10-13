@@ -43,6 +43,10 @@ public final class RaftNode implements AutoCloseable {
         }
     }
     public void start() { timer.scheduleWithFixedDelay(this::tickSafely, 30, 30, TimeUnit.MILLISECONDS); }
+    public synchronized SqlEngine.CounterCommand counterCommand(String sql) {
+        if (failed) throw new IllegalStateException("Raft schema unavailable");
+        return database.counterCommand(sql);
+    }
     private int lastIndex() { return log.size() - 1; }
     private void resetElection() {
         electionDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(
