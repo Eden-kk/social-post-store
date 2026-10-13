@@ -15,6 +15,16 @@ public final class SqlCounterClusterTest {
         }
         throw new AssertionError("value " + node + " expected " + expected);
     }
+    static void awaitDrained(CounterClusterTest t) throws Exception {
+        long end=System.nanoTime()+Duration.ofSeconds(12).toNanos();
+        while(System.nanoTime()<end) {
+            boolean drained=true;
+            for(int i=0;i<3;i++)drained &= t.call(i,"/sql-counter/status",null,null,null).body().contains("pending=0\n");
+            if(drained)return;
+            Thread.sleep(60);
+        }
+        throw new AssertionError("typed outbox not drained");
+    }
     public static void main(String[] args) throws Exception {
         try (var t = new CounterClusterTest()) {
             System.out.println("EVIDENCE_DIR="+t.root);
@@ -46,11 +56,14 @@ public final class SqlCounterClusterTest {
             String ackLost=sql(t,0,"lost-ack","INCREMENT metrics.value BY 4 WHERE id='post'",origin[0]);
             SqlCounterTest.check(ackLost.startsWith("LOCAL_DURABLE"),"lost ACK local acceptance");
             awaitValue(t,1,"17");
-            SqlCounterTest.check(!t.call(0,"/sql-counter/status",null,null,null).body().contains("pending=0\n"),"unacknowledged outbox retained");
+            // Peer 2 is blocked and peer 1 durably merged but discarded every ACK.
+            // An old in-flight ACK cannot acknowledge this newer snapshot version.
+            SqlCounterTest.check(t.call(0,"/sql-counter/status",null,null,null).body().contains("pending=2\n"),"both blocked and ACK-lost destinations remain pending");
             t.stop(0);t.start(0);
             SqlCounterTest.check(sql(t,0,"lost-ack","INCREMENT metrics.value BY 4 WHERE id='post'",origin[0]).equals(ackLost),"lost ACK restart retry");
             t.call(1,"/test/sql-counter-drop-ack","false",null,null);t.heal();
             for(int i=0;i<3;i++)awaitValue(t,i,"17");
+            awaitDrained(t);
             for(String statement:new String[]{"SELECT * FROM metrics","INSERT INTO metrics VALUES ('post',9)","UPDATE metrics SET value=9 WHERE id='post'","DELETE FROM metrics WHERE id='post'"})
                 SqlCounterTest.check(client.execute(java.util.UUID.randomUUID().toString(),statement,Duration.ofSeconds(12)).startsWith("ERR"),"normal SQL blocked");
             for(int i=0;i<3;i++)t.stop(i);for(int i=0;i<3;i++)t.start(i);
