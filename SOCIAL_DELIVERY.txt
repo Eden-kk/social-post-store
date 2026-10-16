@@ -1,0 +1,50 @@
+Social workload local delivery — 2026-10-16
+
+Implemented and tested on branch feat/social-service in isolated worktree.
+50b5af5 Add deterministic social post and like state machine with replay version gate
+dcdc6f2 Expose social API and verify partition recovery, retries and tombstones
+
+Implemented:
+- Raft-applied post create/conditional update/delete; irreversible tombstones.
+- Per(user,post) desired like state with explicit single-writer sequence contract:
+  lower sequence no-op, equal conflicting payload rejects, other writer rejects.
+- Relationship and exact derived likes count change in one deterministic apply.
+- /social HTTP commands, bounded unchanged-ID/body failover client via
+  SqlClient.social(...), /social/view and /social/views APIs backed by a separate
+  existing CounterNode namespace with origin-bound event retries.
+- Same Raft committed prefix reconstructs posts/likes/results after restart.
+- minisql-social-v2 replay gate rejects existing v1 directories; no migration.
+- Runnable sh social-demo.sh, manual HTTP/curl instructions in SOCIAL_API.txt.
+
+Evidence:
+- Full sh test.sh passed: all original tests, new SocialState/SocialCluster tests,
+  and three original Raft fault rounds. Raw output:
+  evidence/social-full-regression-20261016.txt
+- Final sh social-demo.sh rerun passed after raw HTTP ID validator correction.
+  Output and retained process-data directory:
+  evidence/social-demo-final-20261016.txt
+- Tests cover reordered seq1/3/2, equal sequence conflict, second writer conflict,
+  eight concurrent users with repeated requests and exact aggregate, same ID with
+  changed body, all-node isolation, local view acceptance, no-quorum refusal,
+  origin and post-bound retries, uncertain request resolution, leader process
+  failure/new-leader retry, lost view ACK, restart retry, stale-region telemetry
+  after remote deletion, tombstone masking, rejected recreation/late updates,
+  full-cluster restart preserving an active post's count and views.
+- Independent read-only contract review found no blocking business-state flaw.
+  Corrected visible-ASCII ID enforcement, precommit ERR wording, and explicit
+  view retry rejection after learned tombstones. git diff --check passed.
+
+Important limits:
+Local three-JVM logical regions, not real regional deployment or high-QPS proof.
+Views admit against local metadata snapshot: a stale region or concurrent local
+delete may still admit telemetry. Known tombstone hides social reads, not global
+physical erasure; old successful request retries return historical results.
+Views use origin-local retained dedup; no 24h TTL/global exactly-once, and only
+local durable ACK (permanent unique disk loss can lose accepted events).
+Likes do not solve arbitrary multi-device order: a second writer is rejected.
+No PENDING job API/MQ, OR-Set, auth, sharding, compaction, cross-store transaction,
+one-minute RPO, or measured throughput claim. UNKNOWN means outcome uncertainty,
+not durable queued work or cancellation. Headers/owner IDs are trusted demo input.
+
+No remote push, resume edit, real employer submission, or cloud resource was made
+by this implementation task. User-facing resumes should use only verified scope.
