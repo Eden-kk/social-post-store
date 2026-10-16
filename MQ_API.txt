@@ -1,0 +1,110 @@
+Social Post Store — optional RabbitMQ view adapter
+================================================
+Java Raft/PN-counter core plus a separate Python/pika adapter. The Java build
+still has no external dependencies. This is a loopback reliability demonstration,
+not a production broker deployment or a throughput improvement measurement.
+
+START THE DEDICATED LOCAL BROKER
+Requires Python 3.10+, JDK17+, Docker, and a running Docker context. These commands
+use the dedicated colima-social-post context; substitute your own local context.
+Never use a shared production broker with the restart test.
+
+docker --context colima-social-post run -d --name social-post-mq-demo \
+  --hostname social-post-mq-demo -p 127.0.0.1:5679:5672 \
+  -e RABBITMQ_DEFAULT_USER=social -e RABBITMQ_DEFAULT_PASS=local-demo-only \
+  -v social-post-mq-demo:/var/lib/rabbitmq rabbitmq:4.1.4
+docker --context colima-social-post exec social-post-mq-demo rabbitmq-diagnostics -q ping
+
+Image tested: rabbitmq:4.1.4
+Resolved digest: sha256:45c46011117e65ff84bd5e48806af3e4c220161a1b6d670f934b5cee6e282711
+Client pinned: pika==1.3.2 in adapters/view-mq/requirements.txt.
+Credentials above are intentionally public local-demo credentials, not secrets;
+the broker and both applications must remain loopback-only. MQ_USER/MQ_PASSWORD
+can override adapter credentials. No credentials belong in Git history.
+
+RUN THE REPRODUCIBLE TEST/DEMO
+    sh mq-demo.sh
+Optional broker selection:
+    sh mq-demo.sh --docker-context CONTEXT --container DEDICATED_NAME --broker-port 5679
+The script installs the pinned dependency into ignored build/mq-venv, builds Java,
+runs contract tests, starts three fresh Java processes and the Python API/worker,
+RESTARTS the specified broker container preserving its volume, injects consumer
+failure, and asserts outcomes. It kills its own processes and deletes only its
+fresh origin-named test queue. It retains EVIDENCE_DIR logs and Java durable data.
+It does not delete the broker volume or stop your Docker VM. Stop just the demo
+broker afterward with: docker --context colima-social-post stop social-post-mq-demo
+
+INTERACTIVE USE
+Start fresh Java nodes as in SOCIAL_API.txt. Create a post and wait until target
+node0 has applied its metadata. Read origin from GET /social/views/status on that
+same node; use it unchanged even after a process restart using the same disk.
+Start these two processes separately, substituting the actual origin:
+    build/mq-venv/bin/python adapters/view-mq/view_mq.py serve --origin ORIGIN
+    build/mq-venv/bin/python adapters/view-mq/view_mq.py consume --origin ORIGIN --target-port 18210
+Both use localhost broker port5679. API binds localhost18300 by default.
+    curl -i http://127.0.0.1:18300/views -H 'Content-Type: application/json' \
+      --data '{"event_id":"event-1","post_id":"p1","origin":"ORIGIN"}'
+Valid event IDs: 1..128 visible ASCII characters. Post IDs: 1..64 alphanumeric,
+underscore or hyphen. Origin must equal this API's configured incarnation.
+Use a stable event_id and identical payload when retrying, including after UNKNOWN.
+Direct HTTP and MQ events share the target's request-ID namespace: callers must
+not reuse an ID for another logical event or post.
+
+DATA FLOW AND THREE DISTINCT ACKNOWLEDGMENTS
+Client -> ingress -> RabbitMQ durable queue -> worker -> CounterStore -> PN peers
+1. HTTP202 QUEUED: persistent message, mandatory routing and publisher confirmation.
+   It is not proof that counting happened, not a Raft commit or regional replica ACK.
+2. LOCAL_DURABLE from the Java target: its counter state and dedup record persisted.
+   The worker then manually ACKs the delivery. A crash between these two steps
+   causes broker redelivery, which the same origin deduplicates before re-ACK.
+3. PN anti-entropy is unchanged and happens independently. A consumer ACK does not
+   mean all PN peers have received the contribution.
+HTTP503 UNKNOWN: publishing might have succeeded before a lost confirm/response.
+Retry only the identical event. Queue overflow also conservatively returns503;
+it never claims QUEUED when the broker negatively acknowledges the publish.
+HTTP400: invalid ingress input/origin. Fix the request; do not silently change its
+origin as a retry strategy. QUEUED does not guarantee the post will still exist.
+
+QUEUE AND CONSUMER CONTRACT
+Queue name is social.views.<24 hex characters of SHA256(origin)>; queues are
+incarnation-specific. Classic durable queue, persistent messages, reject-publish
+overflow, default maximum 1000 READY messages. --max-messages must match between
+API and worker for that queue. RabbitMQ does not count unacknowledged messages
+toward max-length; this single worker has at most one delivery in flight.
+There is no TTL or automatic eviction. A full queue applies admission backpressure.
+The worker uses manual basic_get, one message at a time, then ACKs only:
+  - HTTP200 LOCAL_DURABLE; or
+  - exact HTTP400 'post deleted locally', explicitly SKIPPED_DELETED (not counted).
+Java checks incarnation before tombstone so a replacement/different origin cannot
+authorize skipping the original queue's event. Use the current server binary.
+Metadata visibility and counter update are still not an atomic transaction; stale
+metadata may admit late telemetry, as documented in SOCIAL_API.txt.
+
+Connection errors, metadata lag ('post not found'), retention capacity, origin or
+payload conflicts, and all unrecognized replies are retained. The connection is
+closed without ACK, RabbitMQ requeues, and worker waits one second before retry.
+No immediate nack-requeue hot loop; retries continue indefinitely. Operator repair
+is required for persistent conflicts. This deliberately simple design can block
+progress behind a poison event and does not provide a DLQ or per-event status DB.
+Logs include APPLIED, SKIPPED_DELETED and RETRY. Disposition logs follow the ACK
+send call but can appear multiple times on replay; logs are not an exactly-once
+audit ledger or proof the broker processed that ACK. Tests additionally inspect
+both messages_ready and messages_unacknowledged at the actual broker.
+
+LIMITS AND INTERVIEW TRADEOFFS
+At-least-once delivery + origin-local dedup, NOT global exactly-once. No automatic
+origin migration, active-active workers, cross-region broker replicas, PENDING
+workflow, 24-hour view dedup or one-minute RPO. A queue survives the tested graceful
+container restart with its same volume; losing that volume is outside this claim.
+Once consumer ACKs, MQ is not a backup for a later lost CounterStore disk. The
+existing PN replication/disk-loss limitations still apply. Retained dedup records
+cap at100k and whole-state persistence/full-state PN replication bound scalability.
+Per-request broker connections and single-thread ingress favor inspectable recovery,
+not high throughput. Basic_get polling is intentionally minimal, not recommended
+as a high-volume streaming design. No benchmark or production capacity is claimed.
+The --test-crash-after-apply flag deliberately exits73; use only in fault tests.
+
+REFERENCE SEMANTICS
+https://www.rabbitmq.com/docs/confirms
+https://www.rabbitmq.com/docs/maxlength
+https://www.rabbitmq.com/docs/reliability

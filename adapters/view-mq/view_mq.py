@@ -130,8 +130,8 @@ def consume(args):
                     if applied and args.test_crash_after_apply:
                         print("TEST_CRASH_AFTER_APPLY " + value["event_id"], flush=True)
                         os._exit(73)
-                    print(("APPLIED " if applied else "SKIPPED_DELETED ") + value["event_id"], flush=True)
                     channel.basic_ack(method.delivery_tag)
+                    print(("APPLIED " if applied else "SKIPPED_DELETED ") + value["event_id"], flush=True)
         except Exception as error:
             print("RETRY " + type(error).__name__ + " " + str(error), flush=True)
             time.sleep(1)

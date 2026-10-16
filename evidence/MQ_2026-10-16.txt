@@ -1,0 +1,16 @@
+Real RabbitMQ integration final transcript (2026-10-16)
+Command: build/mq-venv/bin/python adapters/view-mq/integration.py
+Broker: rabbitmq4.1.4; client pika1.3.2; loopback; three Java processes.
+PASS paused consumer backlog=3, bounded queue rejects overflow without QUEUED
+PASS broker restart retains confirmed backlog; drain and duplicate leave exact count=3
+PASS crash after LOCAL_DURABLE before ACK redelivers unchanged event without double count
+PASS unavailable target retained/retried with bounded delay, no fallback origin
+PASS wrong-origin tombstone cannot ACK; correct origin skips known deleted post
+PASS payload-ID conflict retained without ACK (documented head-of-line limit)
+MQ_INTEGRATION_PASSED
+EXIT=0
+
+Full base regression command: sh test.sh
+ALL_TESTS_PASSED
+EXIT=0
+See MQ_DELIVERY.txt for machine-local full logs/evidence paths and explicit limits.

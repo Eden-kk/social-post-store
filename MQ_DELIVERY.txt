@@ -1,0 +1,38 @@
+Social Post Store MQ v1 delivery — 2026-10-16
+
+Implemented: optional bounded RabbitMQ queue for view ingestion only; no change
+to Raft ordering or PN merge protocol. Publisher confirms produce QUEUED; consumer
+ACK follows origin-local durable dedup/count, or explicit local deletion skip.
+API, core code and tests are documented in MQ_API.txt.
+
+VERIFIED
+Python contract tests: 2 passed.
+SocialClusterTest after origin-before-tombstone fix: passed.
+Real integration: MQ_INTEGRATION_PASSED, EXIT=0.
+Final log: /tmp/social-mq-integration-final.log
+Final evidence: /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/social-mq-56wrsayd
+Broker: RabbitMQ4.1.4 in dedicated local Docker context colima-social-post.
+Three actual JVMs; Python ingress/consumer processes; actual broker queue.
+
+Assertions:
+- Paused consumer: 3 READY messages, counter0; fourth admission not QUEUED.
+- Graceful broker-container restart with volume retains confirmed backlog3.
+- Resume -> count3; duplicate event replay leaves count3.
+- Forced consumer exit73 after LOCAL_DURABLE before ACK: count4, redelivery1;
+  normal restart drains queue with count still4.
+- Unavailable pinned target: event retained, retry delay, restoration -> count5.
+- Wrong origin with tombstoned post cannot ACK; correct origin explicitly skips.
+- Same event ID / different post remains queued for operator repair, not discarded.
+- ACK verification waits for event-specific post-send logs AND actual broker
+  messages_ready=0/messages_unacknowledged=0, then rechecks after worker termination.
+
+Full Java regression: ALL_TESTS_PASSED, EXIT=0 (/tmp/social-mq-regression.log).
+Includes social workload, counter suites and three Raft cluster experiment rounds.
+Read-only independent review found origin-before-tombstone and ACK-evidence issues;
+both corrected and covered in the final real-broker run. No remaining blocker was
+reported for this local scope; this is not a formal correctness proof.
+Not specifically injected: missing-post replica lag, 100k dedup capacity, lost
+publisher-confirm network connection. These conservative code paths are documented,
+not mislabeled as fault-tested. No cloud service or real-region test was run.
+No production workload, high-QPS, independent-region, broker-volume-loss or
+multi-device ordering guarantee inferred from these local tests.

@@ -106,8 +106,10 @@ minisql-counter-v1 directories instead of reinterpreting historically rejected
 commands. No automatic migration and no mixed-version cluster are supported.
 
 Delivery scope: fixed three local JVMs, no real datacenters, sharding, snapshot
-compaction, request-ID reclamation, MQ, PENDING worker, OR-Set, production auth,
+compaction, request-ID reclamation, PENDING worker, OR-Set, production auth,
 one-minute RPO or high-QPS guarantee. Whole-state disk replacement and full-state
 replication prioritize inspectability over throughput. Concurrent-client tests
 demonstrate correctness only, not a capacity benchmark. Region-level durability
 would require independent failure domains and additional deployment verification.
+Optional view-only RabbitMQ ingress is documented separately in MQ_API.txt; the
+base social demo does not require or exercise that broker.

@@ -1,11 +1,18 @@
-MiniSQL + Raft lab
+Social Post Store
 =================
 New October 2026 AI-assisted Java reconstruction. This is NOT recovered MIT
 6.824/ZJU coursework, MySQL, a port of historical code, or production software.
 Original-source ownership claims must not be attached to this new implementation.
 
+Posts and desired-state likes use the Java Raft state machine; views use local
+durable dedup plus PN-counter anti-entropy. Start with sh social-demo.sh and
+SOCIAL_API.txt for the social workload. Optional RabbitMQ view ingestion adds a
+Python adapter, not another database: see MQ_API.txt and sh mq-demo.sh for its
+real-broker restart, backlog, redelivery and origin-pinning tests.
+
 Requirements: JDK 17+, POSIX shell. Tested locally using OpenJDK 23.0.2 with
-javac --release 17; no Maven, Gradle or external dependencies required.
+javac --release 17; no Maven, Gradle or external dependencies for the Java core.
+The OPTIONAL MQ adapter needs Python3.10+, pinned pika1.3.2 and RabbitMQ4.1.4.
 
 One-command narrated project demo: sh demo.sh
 Start with DELIVERY.txt and DEMO.txt for the integrated SQL/schema/partition/recovery
