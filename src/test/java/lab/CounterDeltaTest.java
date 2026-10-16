@@ -10,7 +10,7 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.atomic.*;
 
-/** Deterministic waterline tests plus real HTTP delivery with a controllable durable sink. */
+/** Deterministic waterline tests plus real HTTP delivery with a controllable in-memory sink. */
 public final class CounterDeltaTest {
     static void check(boolean ok, String message) { CounterTest.check(ok, message); }
     static int size(CounterState state) throws Exception {
@@ -18,7 +18,7 @@ public final class CounterDeltaTest {
     }
     interface Condition { boolean get() throws Exception; }
     static void await(Condition condition) throws Exception {
-        long end = System.nanoTime() + 5_000_000_000L;
+        long end = System.nanoTime() + 12_000_000_000L;
         while (!condition.get()) { if (System.nanoTime() > end) throw new AssertionError("delivery timeout"); Thread.sleep(20); }
     }
     static void storeTests() throws Exception {
@@ -74,7 +74,7 @@ public final class CounterDeltaTest {
             byte[] reply="DURABLE".getBytes();e.sendResponseHeaders(200,reply.length);e.getResponseBody().write(reply);
         } finally {e.close();}});server.start();
         var peers=Map.of(0,URI.create("http://127.0.0.1:19010"),1,URI.create("http://127.0.0.1:"+server.getAddress().getPort()));
-        try(var node=new CounterNode(0,peers,Files.createTempDirectory("delta-http-"),"/counter/merge",2500)) {
+        try(var node=new CounterNode(0,peers,Files.createTempDirectory("delta-http-"),"/counter/merge",8000)) {
             node.start();node.add(node.origin(),"one","k\n5");
             await(()->requests.get()>=2);check(node.status().contains("pending=1"),"lost ACK remains pending");
             check(received.get().value("k").intValueExact()==5,"duplicate delivery not double counted");

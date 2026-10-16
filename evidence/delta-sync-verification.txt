@@ -1,0 +1,28 @@
+2026-10-16 changed-key replication verification
+
+Implementation commit: 41cebc5
+Environment: local JDK17-compatible build, loopback HTTP/JVM processes; not regions.
+
+sh test.sh: ALL_TESTS_PASSED, EXIT=0 (/tmp/delta-regression.log).
+Includes CounterDeltaTest, CounterClusterTest, SqlCounterClusterTest,
+SocialClusterTest and three consecutive ClusterTest Raft fault rounds.
+Main production code unchanged after this run. Follow-up change only widens the
+new HTTP test's full timer/timeout to separate the idle check from the full tick.
+Focused final-source CounterDeltaTest: COUNTER_DELTA_TEST_PASSED.
+
+Synthetic state serialization (40 keys, one changed): delta70 bytes/full2674 bytes.
+No HTTP framing included; no throughput, latency or regional durability inference.
+HTTP repair uses an in-memory controllable sink that simulates foreign-state loss;
+it is not a durable-storage recovery proof. Separate three-JVM tests exercise
+real process restarts and persistent replica recovery.
+
+Independent read-only review: no blocking issue found in changedAt indexing,
+captured-version waterlines, one-worker delivery or periodic full repair. Reviewer
+requested explicit malformed legacy zero-version rejection and accurate sink
+wording; both corrected. Test timing widened to8s full/12s await.
+
+sh mq-demo.sh: MQ_INTEGRATION_PASSED, EXIT=0 (/tmp/delta-mq-regression.log),
+including two contract unit tests, real RabbitMQ broker restart, bounded backlog,
+post-apply/pre-ACK consumer crash, unavailable-target retry, tombstone/origin
+checks and conflicting-ID retention. Existing dedicated colima-social-post context
+and social-post-mq-demo container were reused; no external service was deployed.

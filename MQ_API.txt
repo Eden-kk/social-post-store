@@ -57,7 +57,7 @@ Client -> ingress -> RabbitMQ durable queue -> worker -> CounterStore -> PN peer
 2. LOCAL_DURABLE from the Java target: its counter state and dedup record persisted.
    The worker then manually ACKs the delivery. A crash between these two steps
    causes broker redelivery, which the same origin deduplicates before re-ACK.
-3. PN anti-entropy is unchanged and happens independently. A consumer ACK does not
+3. PN changed-key replication and periodic full anti-entropy happen independently (DELTA_SYNC.txt). A consumer ACK does not
    mean all PN peers have received the contribution.
 HTTP503 UNKNOWN: publishing might have succeeded before a lost confirm/response.
 Retry only the identical event. Queue overflow also conservatively returns503;
@@ -98,7 +98,7 @@ workflow, 24-hour view dedup or one-minute RPO. A queue survives the tested grac
 container restart with its same volume; losing that volume is outside this claim.
 Once consumer ACKs, MQ is not a backup for a later lost CounterStore disk. The
 existing PN replication/disk-loss limitations still apply. Retained dedup records
-cap at100k and whole-state persistence/full-state PN replication bound scalability.
+cap at100k and whole-state persistence/periodic full PN replication bound scalability.
 Per-request broker connections and single-thread ingress favor inspectable recovery,
 not high throughput. Basic_get polling is intentionally minimal, not recommended
 as a high-volume streaming design. No benchmark or production capacity is claimed.

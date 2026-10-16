@@ -1,0 +1,51 @@
+Changed-key replication and low-frequency full anti-entropy
+
+Scope: cumulative PN state over existing HTTP, not MQ inter-region replication.
+Default single background worker: initial tick 200ms, fixed delay 300ms between
+completed rounds; full state every approximately 30s. Configure a positive interval
+>=100ms with -Dcounter.fullIntervalMillis=N for tests. These are scheduling knobs,
+not latency guarantees: peer timeouts, disk I/O and scheduling add delay.
+
+CounterStore persists state, local version, request results, per-peer ACK waterlines
+and changedAt[key] in one checksummed atomic-replace file. Every local add marks
+its key; every effective remote merge marks the keys whose components changed.
+No-op merges do not advance version. This also forwards learned contributions.
+
+pendingSnapshot(peer) captures all keys changed after that peer's waterline and
+the local through-version under one lock. Payload includes complete cumulative
+origin components for those keys, not +1 operations. State objects are immutable.
+Only after DURABLE response does sender acknowledge the captured version. A late
+ACK cannot clear newer changes or regress a waterline. No per-event replication
+log, per-request network tasks or concurrent rounds are created.
+
+Example: sent count100/v7; local count102/v9; ACK(v7) stores peerACK7 alongside
+current state102/v9. changedAt[key]=9 remains >7, so the next batch includes102.
+The batch contains ALL dirty keys through its version. Partial-batch waterline
+advancement would be unsafe; no chunking is implemented.
+
+Idle peers receive no high-frequency delta. Periodic full state is sent regardless
+of ACKs to repair a receiver missing foreign contributions even with pending=0.
+The full deadline advances on attempted rounds (not only success), avoiding retry
+floods. A failed full send may wait until the next full interval if no delta remains.
+Existing stale-own-origin/cloned-store rejection remains; this is not automatic
+recovery of a rolled-back writer incarnation. Replica disk loss is not zero-RPO.
+
+PNC1 counter.bin upgrades once to PNC2: retain identity, components, exact request
+results; mark all keys at current version and reset peerACK conservatively before
+atomic persistence. Subsequent restarts retain new waterlines. Invalid zero-version
+nonempty legacy state rejects. No backward downgrade or mixed-version promise.
+The social Raft dialect marker and log replay rules are unchanged.
+
+Tradeoffs: O(number of keys) dirty index retained, O(keys) filtering per pending
+peer, cumulative state per dirty key includes all origins. Whole-file persistence,
+900000-byte full snapshot cap, request retention and single-worker sequential peer
+timeouts remain. No throughput or real-region measurements are claimed.
+
+Tests: CounterDeltaTest covers oldACK/new key updates, cumulative payload, restart,
+remote merge forwarding, no-op merge, ACK reordering, one-time PNC1 migration with
+dedup retained, actual HTTP lost ACK/redelivery, idle suppression and full repair
+without new writes. Synthetic 40-key sample: one-key payload70 bytes vs full2674
+bytes; this excludes HTTP headers and is not a throughput benchmark.
+CounterClusterTest covers real three-JVM partitions, restart, lost ACK and fresh
+incarnation repair (test full interval1500ms). Full suite also retains SQL/social/
+Raft failure tests. See evidence/delta-sync-verification.txt for completed runs.

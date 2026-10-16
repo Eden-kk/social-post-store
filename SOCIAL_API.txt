@@ -83,7 +83,7 @@ LOCAL_DURABLE after local atomic persistence of state+request result. Retry at
 the original incarnation using identical event ID/post ID. Same ID with a
 different post rejects. Event dedup is origin-local, retained until capacity;
 there is no 24-hour expiry, global exactly-once, or transparent origin failover.
-Background full-state anti-entropy merges per-origin components using max;
+Background changed-key batches plus low-frequency full anti-entropy merge per-origin components using max;
 it does not replay additive events, and repeated/old snapshots do not add twice.
 One origin's disk loss before remote replication can lose acknowledged views.
 
@@ -107,8 +107,8 @@ commands. No automatic migration and no mixed-version cluster are supported.
 
 Delivery scope: fixed three local JVMs, no real datacenters, sharding, snapshot
 compaction, request-ID reclamation, PENDING worker, OR-Set, production auth,
-one-minute RPO or high-QPS guarantee. Whole-state disk replacement and full-state
-replication prioritize inspectability over throughput. Concurrent-client tests
+one-minute RPO or high-QPS guarantee. Whole-state disk replacement and periodic full
+replication still limit throughput; see DELTA_SYNC.txt for the incremental path. Concurrent-client tests
 demonstrate correctness only, not a capacity benchmark. Region-level durability
 would require independent failure domains and additional deployment verification.
 Optional view-only RabbitMQ ingress is documented separately in MQ_API.txt; the

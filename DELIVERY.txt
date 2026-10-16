@@ -1,5 +1,9 @@
 Distributed MiniSQL — local project delivery
 
+Historical base-delivery record. Current social/MQ and changed-key extensions are
+documented in SOCIAL_API.txt, MQ_API.txt and DELTA_SYNC.txt; older exclusions below
+describe this base milestone, not the complete current repository.
+
 Agreed scope: a locally demonstrable database project, reproducible fault tests,
 accurate resume material and interview preparation. Not production deployment.
 

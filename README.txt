@@ -5,7 +5,8 @@ New October 2026 AI-assisted Java reconstruction. This is NOT recovered MIT
 Original-source ownership claims must not be attached to this new implementation.
 
 Posts and desired-state likes use the Java Raft state machine; views use local
-durable dedup plus PN-counter anti-entropy. Start with sh social-demo.sh and
+durable dedup plus PN-counter changed-key replication and low-frequency full repair
+(DELTA_SYNC.txt). Start with sh social-demo.sh and
 SOCIAL_API.txt for the social workload. Optional RabbitMQ view ingestion adds a
 Python adapter, not another database: see MQ_API.txt and sh mq-demo.sh for its
 real-broker restart, backlog, redelivery and origin-pinning tests.
