@@ -17,6 +17,7 @@ public final class RaftNode implements AutoCloseable {
     private final DurableState storage;
     private final List<Entry> log = new ArrayList<>();
     private final SqlEngine database = new SqlEngine();
+    private final SocialState social = new SocialState();
     private final Map<String, Result> results = new HashMap<>();
     private final Map<Integer, Integer> next = new HashMap<>(), matched = new HashMap<>();
     private final Set<Integer> blocked = ConcurrentHashMap.newKeySet();
@@ -47,6 +48,10 @@ public final class RaftNode implements AutoCloseable {
     public synchronized SqlEngine.CounterCommand counterCommand(String sql) {
         if (failed) throw new IllegalStateException("Raft schema unavailable");
         return database.counterCommand(sql);
+    }
+    public synchronized void requireActivePost(String post) {
+        if (failed) throw new IllegalStateException("Raft metadata unavailable");
+        social.requireLocallyActive(post);
     }
     private int lastIndex() { return log.size() - 1; }
     private void resetElection() {
@@ -99,7 +104,9 @@ public final class RaftNode implements AutoCloseable {
             Entry e = log.get(++applied);
             if (e.requestId().isEmpty()) continue; // Leader's current-term barrier.
             Result old = results.get(e.requestId());
-            if (old == null) results.put(e.requestId(), new Result(e.sql(), database.execute(e.sql())));
+            if (old == null) results.put(e.requestId(), new Result(e.sql(),
+                e.sql().startsWith(SocialState.PREFIX)
+                    ? social.execute(e.sql().substring(SocialState.PREFIX.length())) : database.execute(e.sql())));
         }
         // Rebuild on restart from the persisted committed prefix, never replay onto an old DB.
     }

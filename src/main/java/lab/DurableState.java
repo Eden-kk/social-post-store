@@ -50,7 +50,7 @@ public final class DurableState implements AutoCloseable {
         catch (Exception e) { throw new IllegalStateException(e); }
     }
     public void bindSqlDialect() throws IOException {
-        byte[] dialect = "minisql-counter-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] dialect = "minisql-social-v2".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Path path = directory.resolve("sql-dialect.bin");
         if (Files.exists(path)) {
             if (!Arrays.equals(Files.readAllBytes(path), dialect)) throw new IOException("SQL dialect mismatch");
