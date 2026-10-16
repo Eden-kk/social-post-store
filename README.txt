@@ -127,3 +127,10 @@ Describe as an AI-assisted independent reconstruction/extension, dated October
 restricted SQL + Raft integration and the specific verified local tests; cannot
 claim historical integration, MySQL compatibility, production readiness,
 benchmarked performance gains, or snapshots not implemented here.
+
+Social workload extension (2026-10-16):
+Run sh social-demo.sh for the narrated three-JVM fault/recovery demonstration.
+Read SOCIAL_API.txt for HTTP commands, consistency contracts, and limitations.
+New binaries require fresh data directories (minisql-social-v2 dialect); do not
+reuse older v1 state or mix versions. Historical verification elsewhere describes
+its respective version, not an automatic migration guarantee.

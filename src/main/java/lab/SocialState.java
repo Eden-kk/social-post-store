@@ -88,11 +88,13 @@ public final class SocialState {
                 }
                 case "GET" -> {
                     fields(p, 2); Post post = post(p[1]);
+                    if (post.deleted) yield "OK POST {\"version\":" + post.version + ",\"deleted\":true}";
                     yield "OK POST {\"owner\":" + json(post.owner) + ",\"content\":" + json(post.content)
                         + ",\"version\":" + post.version + ",\"deleted\":" + post.deleted + ",\"likes\":" + post.likes + "}";
                 }
                 case "GET_LIKE" -> {
                     fields(p, 3); Post post = post(p[1]); identifier(p[2]);
+                    if (post.deleted) yield "ERR post deleted";
                     Like like = post.relationships.get(p[2]);
                     yield like == null ? "OK LIKE absent" : "OK LIKE writer=" + like.writer
                         + " sequence=" + like.sequence + " liked=" + like.liked;

@@ -14,8 +14,16 @@ public final class SqlClient {
     private final long attemptNanos;
     private final long backoffNanos;
     private final HttpClient http;
+    private final String path;
 
     public SqlClient(List<URI> endpoints, Duration attemptTimeout, Duration backoff) {
+        this(endpoints, attemptTimeout, backoff, "/sql");
+    }
+    public static SqlClient social(List<URI> endpoints, Duration attemptTimeout, Duration backoff) {
+        return new SqlClient(endpoints, attemptTimeout, backoff, "/social");
+    }
+    private SqlClient(List<URI> endpoints, Duration attemptTimeout, Duration backoff, String path) {
+        this.path = path;
         if (endpoints == null || endpoints.isEmpty()) throw new IllegalArgumentException("endpoints required");
         for (URI endpoint : endpoints) {
             if (endpoint == null || !"http".equals(endpoint.getScheme()) || endpoint.getHost() == null
@@ -36,12 +44,12 @@ public final class SqlClient {
     public String execute(String requestId, String sql, Duration deadline)
             throws IOException, InterruptedException {
         long budget = nanos(deadline, false);
-        if (sql != null && SqlEngine.isCounterStatement(sql))
+        if (path.equals("/sql") && sql != null && SqlEngine.isCounterStatement(sql))
             throw new IllegalArgumentException("COUNTER operations require an origin-pinned request, not Raft failover");
-        if (requestId == null || requestId.isBlank() || requestId.length() > 128
+        if (requestId == null || requestId.isBlank() || requestId.length() > (path.equals("/social") ? 120 : 128)
                 || !requestId.equals(requestId.strip())
                 || requestId.chars().anyMatch(c -> c < 33 || c > 126)
-                || sql == null || sql.isBlank() || sql.length() > 8192)
+                || sql == null || sql.isBlank() || sql.length() > (path.equals("/social") ? 8183 : 8192))
             throw new IllegalArgumentException("invalid request ID or SQL");
         // Encode once: every retry must carry identical SQL, including whitespace.
         byte[] body = sql.getBytes(StandardCharsets.UTF_8);
@@ -53,7 +61,7 @@ public final class SqlClient {
             long remaining = budget - (System.nanoTime() - started);
             if (remaining <= 0) throw new OutcomeUnknownException(lastFailure);
             long timeout = Math.min(attemptNanos, remaining);
-            var request = HttpRequest.newBuilder(endpoints.get(next).resolve("/sql"))
+            var request = HttpRequest.newBuilder(endpoints.get(next).resolve(path))
                 .timeout(Duration.ofNanos(timeout)).header("X-Request-ID", requestId)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
             var pending = http.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

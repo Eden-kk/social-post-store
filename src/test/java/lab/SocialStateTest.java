@@ -24,7 +24,8 @@ public final class SocialStateTest {
         check(state.execute("LIKE\tp\tu\tphone\t5\ttrue").equals("ERR post deleted"), "no deleted like");
         try { state.requireLocallyActive("p"); throw new AssertionError("deleted view"); }
         catch (IllegalArgumentException expected) { }
-        check(state.execute("GET\tp").contains("\"likes\":1"), "rejected commands unchanged");
+        check(state.execute("GET\tp").equals("OK POST {\"version\":3,\"deleted\":true}"), "tombstone hides content/count");
+        check(state.execute("GET_LIKE\tp\tu").equals("ERR post deleted"), "tombstone hides relationship");
         check(state.execute("CREATE\tx\tu\tbad\nref").startsWith("ERR"), "bad payload");
         System.out.println("SOCIAL_STATE_TEST_PASSED");
     }

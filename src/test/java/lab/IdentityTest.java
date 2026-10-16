@@ -60,6 +60,8 @@ public final class IdentityTest {
         }
         rejected(0, PEERS, oldDialect, "legacy SQL dialect");
         if (Files.exists(oldDialect.resolve("sql-dialect.bin"))) throw new AssertionError("legacy dialect rebound");
+        Files.writeString(oldDialect.resolve("sql-dialect.bin"), "minisql-counter-v1");
+        rejected(0, PEERS, oldDialect, "SQL dialect mismatch");
         Files.write(directory.resolve("sql-dialect.bin"), new byte[]{0});
         rejected(0, PEERS, directory, "SQL dialect mismatch");
         System.out.println("IdentityTest passed; evidence=" + directory + "; legacy=" + legacy);

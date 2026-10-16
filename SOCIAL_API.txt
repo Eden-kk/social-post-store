@@ -1,0 +1,113 @@
+Local social workload on MiniSQL/Raft — protocol and product boundary
+
+Run the narrated, self-cleaning three-JVM demo:
+    sh social-demo.sh
+It builds, executes assertions, injects logical network partitions, kills and
+restarts processes, prints an EVIDENCE_DIR, then terminates all child JVMs. Logs
+and local data remain in that temporary directory for inspection. No cloud cost,
+credentials or internet deployment are involved.
+
+For interactive HTTP exploration (three terminals, fresh data directories):
+    sh build.sh
+    java -cp build/classes lab.Main 0 /tmp/social-demo-node0 18210,18211,18212
+    java -cp build/classes lab.Main 1 /tmp/social-demo-node1 18210,18211,18212
+    java -cp build/classes lab.Main 2 /tmp/social-demo-node2 18210,18211,18212
+Choose unused ports and unused directories; never overwrite an old experiment.
+GET /status on each node locates role=leader. All endpoints bind loopback only.
+Add --test-controls only for local fault experiments; POST /test/block with the
+comma-separated peer IDs blocks protocol traffic for that node. Empty body heals.
+
+POST /social accepts TAB-separated UTF-8 commands (not JSON), and requires
+X-Request-ID (at most 120 visible ASCII characters). Every retry carries the exact
+same ID and body. SQL and social IDs occupy reserved separate namespaces.
+
+Commands:
+    CREATE<TAB>post<TAB>owner<TAB>content_reference
+    UPDATE<TAB>post<TAB>owner<TAB>expected_version<TAB>content_reference
+    DELETE<TAB>post<TAB>owner<TAB>expected_version
+    LIKE<TAB>post<TAB>user<TAB>writer<TAB>sequence<TAB>true|false
+    GET<TAB>post
+    GET_LIKE<TAB>post<TAB>user
+
+IDs: 1-64 ASCII letters/digits/underscore/hyphen. Content reference: 1-2048
+characters, no control characters. Version and sequence: positive signed long.
+CREATE starts at version 1; UPDATE and DELETE advance it with compare-and-set.
+Deleted IDs cannot be reused. GET on deleted post returns only version+tombstone;
+fresh GET_LIKE on deleted post rejects. Historical request retries return their
+original results even after deletion: use a fresh ID for a fresh read.
+
+Example (zsh/bash ANSI-C quoting supplies actual tabs, not literal backslashes):
+    curl -s http://127.0.0.1:18210/status
+    curl -s -X POST http://127.0.0.1:18210/social \
+      -H 'X-Request-ID: create-p1' --data-binary $'CREATE\tp1\tu1\tobject://p1'
+Send to whichever node is leader, or use the Java bounded-retry client:
+    SqlClient.social(peers, Duration.ofSeconds(4), Duration.ofMillis(40))
+        .execute("like-p1-u1-1", "LIKE\tp1\tu1\tphone\t1\ttrue", Duration.ofSeconds(15));
+Same command through curl:
+    curl -s -X POST http://127.0.0.1:18210/social \
+      -H 'X-Request-ID: like-p1-u1-1' --data-binary $'LIKE\tp1\tu1\tphone\t1\ttrue'
+
+Social replies are text bodies: OK ..., ERR ..., NOT_LEADER id, or UNKNOWN retry
+same request_id. OK follows committed application or an already committed cached
+result. ERR is a terminal protocol/business outcome; payload-ID conflicts can
+reject before commitment, while state-machine business errors commit as results.
+NOT_LEADER is a routing hint. UNKNOWN can commit
+later, and is NOT cancellation, a durable job receipt or a PENDING API. Http 200
+alone is not business success. Client deadline expiry similarly means unknown.
+The bounded client retries unchanged ID/body across fixed peers; it does not
+persist IDs for the caller. New logical actions and new reads need fresh IDs.
+
+Like ordering contract:
+The first accepted sequence binds (post,user) to one explicit logical writer.
+That writer must retain a monotonically increasing sequence across its restarts.
+Another writer is rejected, not silently compared against independent counters.
+Lower sequences are stale no-ops; equal sequence/same state is a no-op; equal
+sequence/different state rejects. Higher sequence/same state advances ordering
+without increasing the count. It is desired state, not unconditional +/-.
+Accepted relationship state and aggregate count change in the same deterministic
+Raft apply. This does NOT solve arbitrary multi-device last-click ordering.
+Owner/user/writer are trusted demo inputs, NOT authentication or authorization.
+
+Views:
+    GET /social/views/status -> origin=<incarnation>, pending peers, last failure
+    POST /social/view        -> body post ID, X-Request-ID event ID,
+                                X-Counter-Origin original incarnation
+    POST /social/views       -> body post ID, returns OK EVENTUAL <count>
+Example: copy origin from /social/views/status, then:
+    curl -s -X POST http://127.0.0.1:18210/social/view \
+      -H 'X-Request-ID: event-1' -H 'X-Counter-Origin: COPY_ORIGIN_HERE' --data-binary p1
+    curl -s -X POST http://127.0.0.1:18210/social/views --data-binary p1
+
+View acceptance increments exactly +1 in a dedicated PN namespace and returns
+LOCAL_DURABLE after local atomic persistence of state+request result. Retry at
+the original incarnation using identical event ID/post ID. Same ID with a
+different post rejects. Event dedup is origin-local, retained until capacity;
+there is no 24-hour expiry, global exactly-once, or transparent origin failover.
+Background full-state anti-entropy merges per-origin components using max;
+it does not replay additive events, and repeated/old snapshots do not add twice.
+One origin's disk loss before remote replication can lose acknowledged views.
+
+Post/view boundary: metadata check and counter write/read are not one atomic
+transaction. Views are telemetry admitted using a locally applied snapshot.
+An isolated node, or a write racing a local deletion, may accept a late event.
+Once that node observes the tombstone, new view operations reject; the historical
+counter state remains for convergence but does not resurrect/expose a deleted
+post via the social view API. Merge does not depend on post presence so metadata
+lag cannot discard replica contributions. There is no global instant erasure.
+View retries after the local tombstone is known are rejected by admission before
+dedup lookup; that rejection does not mean the original event was never counted.
+
+Persistence and compatibility:
+Social commands share the Raft committed prefix; restart into an empty state
+machine reconstructs posts, relationships, exact aggregate and operation results.
+Views restore their separate local state and resume anti-entropy. Neither read
+combines the two stores atomically. New dialect minisql-social-v2 rejects existing
+minisql-counter-v1 directories instead of reinterpreting historically rejected
+commands. No automatic migration and no mixed-version cluster are supported.
+
+Delivery scope: fixed three local JVMs, no real datacenters, sharding, snapshot
+compaction, request-ID reclamation, MQ, PENDING worker, OR-Set, production auth,
+one-minute RPO or high-QPS guarantee. Whole-state disk replacement and full-state
+replication prioritize inspectability over throughput. Concurrent-client tests
+demonstrate correctness only, not a capacity benchmark. Region-level durability
+would require independent failure domains and additional deployment verification.

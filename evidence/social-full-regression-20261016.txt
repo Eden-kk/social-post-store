@@ -1,0 +1,46 @@
+SqlEngineTest passed
+DurableStateTest passed; evidence=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-state-test-10612745355664079263
+IdentityTest passed; evidence=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-identity-test-10232248802155130604; legacy=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-unbound-test-1877571589556880380
+SqlClientTest passed
+COUNTER_TEST_PASSED
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-5507562426744637286
+PASS isolated writes, minority SQL protection, origin-bound retry, restart replay, exact sum
+PASS lost ACK replay, duplicate retry and full restart
+PASS empty-outbox anti-entropy, fresh incarnation recovery, equal persisted components
+COUNTER_CLUSTER_TEST_PASSED
+SQL_COUNTER_TEST_PASSED
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-7855277574790484108
+PASS Raft DDL, lagging-schema rejection, sparse zero, partition writes, namespace isolation, origin/payload checks, lost-ACK restart retry, exact convergence
+SQL_COUNTER_CLUSTER_TEST_PASSED
+SOCIAL_STATE_TEST_PASSED
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-16049541669814620444
+PASS ordered posts, likes seq1/3/2, writer conflict, concurrent retries and exact count=9
+PASS all-partition local views, no minority Raft success, origin retries, heal views=3 likes=10
+PASS leader process loss, new-leader retry and exact committed count
+PASS lost ACK, restart dedup, stale-region telemetry boundary, tombstones and full-cluster replay
+SOCIAL_CLUSTER_TEST_PASSED
+CLUSTER_ROUND=1
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-11515377311465732679
+PASS replicated CRUD and payload-bound duplicate retry
+PASS client failover from dead leader, safe retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+CLUSTER_ROUND=2
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-6376419214249056299
+PASS replicated CRUD and payload-bound duplicate retry
+PASS client failover from dead leader, safe retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+CLUSTER_ROUND=3
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/minisql-raft-test-8745465599602982973
+PASS replicated CRUD and payload-bound duplicate retry
+PASS client failover from dead leader, safe retry and restarted follower catch-up
+PASS minority cannot confirm write/read; majority progresses; divergent log healed
+PASS all-node restart, full-log SQL replay and durable dedup
+PASS concurrent writes and independently replayed persisted state of all three replicas
+CLUSTER_TEST_PASSED
+ALL_TESTS_PASSED

@@ -1,0 +1,10 @@
+Command: sh social-demo.sh
+Final rerun after raw HTTP request-ID validation and reviewer corrections.
+SOCIAL_STATE_TEST_PASSED
+EVIDENCE_DIR=/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-3573091513554268957
+PASS ordered posts, likes seq1/3/2, writer conflict, concurrent retries and exact count=9
+PASS all-partition local views, no minority Raft success, origin retries, heal views=3 likes=10
+PASS leader process loss, new-leader retry and exact committed count
+PASS lost ACK, restart dedup, stale-region telemetry boundary, tombstones and full-cluster replay
+SOCIAL_CLUSTER_TEST_PASSED
+Process exit_code=0.

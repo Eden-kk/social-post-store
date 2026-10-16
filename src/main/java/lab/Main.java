@@ -24,6 +24,7 @@ public final class Main {
         var node = new RaftNode(id, peers, Path.of(args[1]));
         var counter = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("counter"));
         var sqlCounter = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("sql-counter"), "/sql-counter/merge");
+        var views = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("social-views"), "/social/views/merge");
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", peers.get(id).getPort()), 32);
         var workers = Executors.newFixedThreadPool(16);
         server.setExecutor(workers);
@@ -36,11 +37,39 @@ public final class Main {
                     response = counter.status().getBytes(StandardCharsets.UTF_8);
                 } else if (path.equals("/sql-counter/status") && exchange.getRequestMethod().equals("GET")) {
                     response = sqlCounter.status().getBytes(StandardCharsets.UTF_8);
+                } else if (path.equals("/social/views/status") && exchange.getRequestMethod().equals("GET")) {
+                    response = views.status().getBytes(StandardCharsets.UTF_8);
                 } else {
                     if (!exchange.getRequestMethod().equals("POST")) {send(exchange, 405, "POST required".getBytes()); return;}
                     byte[] body = exchange.getRequestBody().readNBytes(1_048_577);
                     if (body.length > 1_048_576) throw new IllegalArgumentException("body too large");
                     switch (path) {
+                        case "/social" -> {
+                            String key = exchange.getRequestHeaders().getFirst("X-Request-ID");
+                            if (key == null || key.isBlank() || key.length() > 120
+                                    || key.chars().anyMatch(c -> c < 33 || c > 126))
+                                throw new IllegalArgumentException("X-Request-ID required, max 120 characters");
+                            response = node.submit("social:" + key, SocialState.PREFIX + new String(body, StandardCharsets.UTF_8), 3000)
+                                .getBytes(StandardCharsets.UTF_8);
+                        }
+                        case "/social/view", "/social/views" -> {
+                            String post = SocialState.identifier(new String(body, StandardCharsets.UTF_8));
+                            // Admission uses a locally applied snapshot, not a cross-store transaction.
+                            // Concurrent or remotely committed deletion may still admit telemetry.
+                            node.requireActivePost(post);
+                            String result = path.equals("/social/views") ? "OK EVENTUAL " + views.value(post)
+                                : views.add(exchange.getRequestHeaders().getFirst("X-Counter-Origin"),
+                                    exchange.getRequestHeaders().getFirst("X-Request-ID"), post + "\n1");
+                            response = result.getBytes(StandardCharsets.UTF_8);
+                        }
+                        case "/social/views/merge" -> {
+                            response = views.receive(Integer.parseInt(exchange.getRequestHeaders().getFirst("X-Counter-Peer")), body);
+                            if (views.droppingAck()) { exchange.close(); return; }
+                        }
+                        case "/test/social-views-drop-ack" -> {
+                            if (args.length != 4 || !args[3].equals("--test-controls")) {send(exchange, 404, new byte[0]); return;}
+                            views.dropAck(new String(body, StandardCharsets.UTF_8).equals("true")); response = "OK".getBytes();
+                        }
                         case "/sql-counter/merge" -> {
                             response = sqlCounter.receive(Integer.parseInt(exchange.getRequestHeaders().getFirst("X-Counter-Peer")), body);
                             if (sqlCounter.droppingAck()) { exchange.close(); return; }
@@ -72,6 +101,8 @@ public final class Main {
                             String key = exchange.getRequestHeaders().getFirst("X-Request-ID");
                             if (key == null) throw new IllegalArgumentException("X-Request-ID required");
                             String sql = new String(body, StandardCharsets.UTF_8);
+                            if (sql.startsWith(SocialState.PREFIX) || key.startsWith("social:"))
+                                throw new IllegalArgumentException("reserved social command/request namespace");
                             String result;
                             if (SqlEngine.isCounterStatement(sql)) {
                                 var command = node.counterCommand(sql);
@@ -86,7 +117,7 @@ public final class Main {
                             var ids = new HashSet<Integer>();
                             String value = new String(body, StandardCharsets.UTF_8).trim();
                             if (!value.isEmpty()) for (String x : value.split(",")) ids.add(Integer.parseInt(x));
-                            node.block(ids); counter.block(ids); sqlCounter.block(ids); response = "OK".getBytes(StandardCharsets.UTF_8);
+                            node.block(ids); counter.block(ids); sqlCounter.block(ids); views.block(ids); response = "OK".getBytes(StandardCharsets.UTF_8);
                         }
                         default -> {send(exchange, 404, new byte[0]); return;}
                     }
@@ -99,8 +130,9 @@ public final class Main {
             server.stop(0); workers.shutdownNow(); try {node.close();} catch (IOException ignored) {}
             try {counter.close();} catch (IOException ignored) {}
             try {sqlCounter.close();} catch (IOException ignored) {}
+            try {views.close();} catch (IOException ignored) {}
         }));
-        server.start(); node.start(); counter.start(); sqlCounter.start(); System.out.println("STARTED node="+id);
+        server.start(); node.start(); counter.start(); sqlCounter.start(); views.start(); System.out.println("STARTED node="+id);
     }
     private static void send(HttpExchange exchange, int code, byte[] body) throws IOException {
         exchange.sendResponseHeaders(code, body.length);
