@@ -8,7 +8,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Fixed loopback peers; full-state anti-entropy also repairs an empty outbox. */
+/** Single worker sends changed keys; periodic full state repairs an empty outbox. */
 public final class CounterNode implements AutoCloseable {
     private final int id;
     private final Map<Integer, URI> peers;
@@ -19,10 +19,18 @@ public final class CounterNode implements AutoCloseable {
     private volatile Set<Integer> blocked = Set.of();
     private volatile boolean dropAck;
     private volatile String lastError = "none";
+    private final long fullIntervalNanos;
+    private long nextFull;
     public CounterNode(int id, Map<Integer, URI> peers, Path directory) throws IOException {
         this(id, peers, directory, "/counter/merge");
     }
     public CounterNode(int id, Map<Integer, URI> peers, Path directory, String mergePath) throws IOException {
+        this(id, peers, directory, mergePath, Long.getLong("counter.fullIntervalMillis", 30_000L));
+    }
+    public CounterNode(int id, Map<Integer, URI> peers, Path directory, String mergePath, long fullIntervalMillis) throws IOException {
+        if (fullIntervalMillis < 100) throw new IllegalArgumentException("full interval must be >=100ms");
+        fullIntervalNanos = TimeUnit.MILLISECONDS.toNanos(fullIntervalMillis);
+        nextFull = System.nanoTime() + fullIntervalNanos;
         this.mergePath = mergePath;
         this.id = id; this.peers = Map.copyOf(peers); store = new CounterStore(directory, id, peers);
     }
@@ -37,8 +45,8 @@ public final class CounterNode implements AutoCloseable {
         String[] parts = body.split("\n", -1);
         if (parts.length != 2) throw new IllegalArgumentException("body must be key newline delta");
         String result = store.add(origin, requestId, parts[0], Long.parseLong(parts[1]));
-        // Network work is bounded and happens outside the store lock; acceptance is already durable.
-        replicate(); return result;
+        // The periodic worker coalesces writes without queuing per-request network tasks.
+        return result;
     }
     public byte[] receive(int sender, byte[] body) throws IOException {
         if (!peers.containsKey(sender) || sender == id || blocked.contains(sender)) throw new IOException("counter peer blocked");
@@ -48,9 +56,13 @@ public final class CounterNode implements AutoCloseable {
     }
     private void replicate() {
         try {
-            var snapshot = store.snapshot(); var buffer = new ByteArrayOutputStream(); snapshot.state().write(new DataOutputStream(buffer));
+            long now = System.nanoTime(); boolean full = now - nextFull >= 0;
+            if (full) nextFull = now + fullIntervalNanos;
             for (var peer : peers.entrySet()) {
                 if (peer.getKey() == id || blocked.contains(peer.getKey())) continue;
+                var snapshot = full ? store.snapshot() : store.pendingSnapshot(peer.getKey());
+                if (snapshot == null) continue;
+                var buffer = new ByteArrayOutputStream(); snapshot.state().write(new DataOutputStream(buffer));
                 CompletableFuture<HttpResponse<String>> pending = null;
                 try {
                     var request = HttpRequest.newBuilder(peer.getValue().resolve(mergePath))

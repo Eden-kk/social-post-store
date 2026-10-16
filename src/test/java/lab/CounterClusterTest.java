@@ -18,7 +18,7 @@ public final class CounterClusterTest implements AutoCloseable {
         for (var s:reservations) s.close();
     }
     void start(int id) throws Exception {
-        processes[id]=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),
+        processes[id]=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),"-Dcounter.fullIntervalMillis=1500","-cp",System.getProperty("java.class.path"),
             "lab.Main",""+id,root.resolve("node"+id).toString(),ports[0]+","+ports[1]+","+ports[2],"--test-controls")
             .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(root.resolve("node"+id+".log").toFile())).start();
         long end=System.nanoTime()+Duration.ofSeconds(8).toNanos();
@@ -68,6 +68,8 @@ public final class CounterClusterTest implements AutoCloseable {
         call(1,"/test/counter-drop-ack","true",null,null);
         call(0,"/test/block","2",null,null);call(2,"/test/block","0,1",null,null);
         add(0,"lost-ack",4);
+        long ackEnd=System.nanoTime()+Duration.ofSeconds(5).toNanos();
+        while (!call(1,"/counter/read","count",null,null).body().equals("17") && System.nanoTime()<ackEnd) Thread.sleep(50);
         CounterTest.check(call(1,"/counter/read","count",null,null).body().equals("17"),"receiver persisted before discarded ACK");
         stop(0);start(0);call(1,"/test/counter-drop-ack","false",null,null);heal();converge("17");add(0,"lost-ack",4);converge("17");
         for(int i=0;i<3;i++)stop(i);for(int i=0;i<3;i++)start(i);converge("17");

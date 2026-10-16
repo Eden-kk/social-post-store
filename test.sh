@@ -7,6 +7,7 @@ java -cp build/classes lab.DurableStateTest
 java -cp build/classes lab.IdentityTest
 java -cp build/classes lab.SqlClientTest
 java -cp build/classes lab.CounterTest
+java -cp build/classes lab.CounterDeltaTest
 java -cp build/classes lab.CounterClusterTest
 java -cp build/classes lab.SqlCounterTest
 java -cp build/classes lab.SqlCounterClusterTest

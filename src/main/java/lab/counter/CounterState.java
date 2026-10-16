@@ -43,6 +43,17 @@ public final class CounterState {
         }
         return false;
     }
+    public Set<String> keys() { return values.keySet(); }
+    public Set<String> changedKeys(CounterState previous) {
+        var changed = new TreeSet<String>();
+        values.forEach((key, components) -> { if (!components.equals(previous.values.get(key))) changed.add(key); });
+        return changed;
+    }
+    public CounterState selectKeys(Collection<String> keys) {
+        var selected = new TreeMap<String, Map<String, Component>>();
+        for (String key : keys) if (values.containsKey(key)) selected.put(key, values.get(key));
+        return new CounterState(selected);
+    }
     public BigInteger value(String key) {
         BigInteger result = BigInteger.ZERO;
         for (var c : values.getOrDefault(key, Map.of()).values())
