@@ -1,0 +1,40 @@
+Social workload extension — acceptance contract, 2026-10-16
+
+Scope: deliverable local software and reproducible tests, not production hosting.
+Existing three-JVM Raft and PN replication remain the foundation. This document
+records the acceptance criteria; verified execution evidence is SOCIAL_DELIVERY.txt.
+All gates below passed for the scoped local delivery on 2026-10-16.
+
+Required behavior
+1. Post create/update/delete are ordered Raft state-machine commands. Tombstones
+   prohibit accidental recreation and late updates; authorization is a local
+   trusted-input demo contract, not authenticated internet service security.
+2. Likes store desired state per user/post, not blind +/- commands. An explicit
+   sequence/writer contract resolves reordered operations; equal sequence with
+   different payload must reject. Derived count changes atomically with accepted
+   state changes and cannot count a repeated true twice.
+3. Views use stable event IDs and original counter incarnation for retry. Counter
+   state plus request result persist together. Scope is origin-local retention,
+   not global exactly-once or an implemented 24-hour expiry policy.
+4. No-quorum ordinary/domain commands do not acknowledge success. UNKNOWN means
+   possibly committed, not durable PENDING or guaranteed future execution.
+5. Recovery reconstructs domain state and request results from the committed
+   prefix, while PN state reconciles separately. Full restart preserves both.
+
+Evidence gates
+- Unit: malformed input, stale/equal/conflicting sequence, duplicate like, unlike,
+  relike, post deletion, attempted recreation and updates after deletion.
+- Real processes: normal post/like flow, same-ID retry, sequence reorder, partition
+  views, minority refusal, healing, exact counters and complete cluster restart.
+- Replay compatibility: reject old dialect rather than reinterpret historical
+  rejected commands as new successful commands.
+- A runnable narrated demo with assertions, retained logs and process cleanup.
+- Independent review of cross-store races, retry semantics and deletion scope.
+
+Explicit non-goals
+OR-Set/real MQ, transparent cross-origin view dedup, general multi-device last-click
+ordering, PENDING job scheduling, TTL dedup reclamation, sharding, snapshots,
+production authentication, physical regions, one-minute RPO or zero-loss local
+acknowledgment, high-QPS claims. Future design material must be labeled separately.
+An isolated stale replica may accept views after a remote delete; never claim
+global immediate deletion enforcement across the counter path.

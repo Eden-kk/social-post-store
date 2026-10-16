@@ -48,3 +48,15 @@ not durable queued work or cancellation. Headers/owner IDs are trusted demo inpu
 
 No remote push, resume edit, real employer submission, or cloud resource was made
 by this implementation task. User-facing resumes should use only verified scope.
+
+Parent integration verification:
+Fast-forward merged into main checkout on 2026-10-16 at 5a06a42.
+Independently reran sh social-demo.sh in /Users/yvette/26ng/minisql-raft-lab:
+exit 0, SOCIAL_STATE_TEST_PASSED and SOCIAL_CLUSTER_TEST_PASSED.
+Retained main-checkout run data:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-14825961101758648237
+PASS ordered posts, seq1/3/2, writer conflict, concurrent retries, exact count=9.
+PASS all-partition local views, no-quorum refusal, origin retry, healed views=3 likes=10.
+PASS leader loss/new-leader retry, lost ACK, tombstones and full restart.
+The private TT resume and bilingual interview pack were updated by the parent;
+the resume source compiled successfully. No PDF export or visual layout check claimed.
