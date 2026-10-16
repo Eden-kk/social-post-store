@@ -107,6 +107,8 @@ public final class SocialClusterTest {
             check(command(client, "DELETE\tp\towner\t1").equals("OK DELETE version=2"), "majority tombstone");
             check(t.call(2, "/social/view", "p", "stale-telemetry", origin[2]).body().startsWith("LOCAL_DURABLE"), "documented stale admission");
             t.heal(); for (int i = 0; i < 3; i++) deleted(t, i);
+            check(t.call(1, "/social/view", "p", "wrong-origin-deleted", origin[0]).body()
+                .equals("retry must use original incarnation"), "origin checked before tombstone");
             check(command(client, "UPDATE\tp\towner\t2\tnew").equals("ERR post deleted"), "no late update");
             check(command(client, "CREATE\tp\towner\tnew").startsWith("ERR"), "no recreate");
             check(command(client, "LIKE\tp\tu\tphone\t4\tfalse").equals("ERR post deleted"), "no deleted like");

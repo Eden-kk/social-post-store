@@ -30,6 +30,7 @@ public final class CounterNode implements AutoCloseable {
     public void block(Set<Integer> ids) { blocked = Set.copyOf(ids); }
     public void dropAck(boolean enabled) { dropAck = enabled; }
     public boolean droppingAck() { return dropAck; }
+    public String origin() { return store.origin(); }
     public String status() { return "origin=" + store.origin() + "\npending=" + store.pending() + "\nlastFailure=" + lastError + "\n"; }
     public String value(String key) { return store.value(key); }
     public String add(String origin, String requestId, String body) throws IOException {

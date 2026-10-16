@@ -54,6 +54,10 @@ public final class Main {
                         }
                         case "/social/view", "/social/views" -> {
                             String post = SocialState.identifier(new String(body, StandardCharsets.UTF_8));
+                            // A terminal tombstone reply must belong to the requested incarnation.
+                            if (path.equals("/social/view") && !views.origin().equals(
+                                    exchange.getRequestHeaders().getFirst("X-Counter-Origin")))
+                                throw new IllegalArgumentException("retry must use original incarnation");
                             // Admission uses a locally applied snapshot, not a cross-store transaction.
                             // Concurrent or remotely committed deletion may still admit telemetry.
                             node.requireActivePost(post);
