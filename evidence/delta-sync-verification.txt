@@ -26,3 +26,13 @@ including two contract unit tests, real RabbitMQ broker restart, bounded backlog
 post-apply/pre-ACK consumer crash, unavailable-target retry, tombstone/origin
 checks and conflicting-ID retention. Existing dedicated colima-social-post context
 and social-post-mq-demo container were reused; no external service was deployed.
+
+Independent main-checkout recheck after fast-forward to7745d08:
+sh build.sh; CounterDeltaTest; CounterClusterTest -> exit0.
+COUNTER_DELTA_TEST_PASSED, COUNTER_CLUSTER_TEST_PASSED.
+PASS HTTP lost ACK retry, idle delta suppression, full repair with no pending writes.
+PASS isolated writes, origin-bound retry, restart replay and exact sum.
+PASS lost ACK replay, duplicate retry and full restart.
+PASS empty-outbox anti-entropy, fresh incarnation recovery, equal persisted components.
+Retained local evidence directory:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-8237207767734316658
