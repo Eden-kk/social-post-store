@@ -36,3 +36,9 @@ publisher-confirm network connection. These conservative code paths are document
 not mislabeled as fault-tested. No cloud service or real-region test was run.
 No production workload, high-QPS, independent-region, broker-volume-loss or
 multi-device ordering guarantee inferred from these local tests.
+
+Main-checkout reproduction after fast-forward to f25d2c3:
+sh mq-demo.sh -> Python 2 tests OK, MQ_INTEGRATION_PASSED, exit0.
+Retained local logs: /var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/social-mq-z6x2pm3w
+The independent run exercised all six PASS checkpoints above using real broker
+ready/unacknowledged checks. Private resume/interview documents stay outside Git.
