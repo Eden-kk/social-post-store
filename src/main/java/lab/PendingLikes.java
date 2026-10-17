@@ -22,6 +22,8 @@ public final class PendingLikes implements AutoCloseable {
     private final Map<String, Item> items = new LinkedHashMap<>();
     private String origin;
     private boolean failed;
+    private long sequence;
+    private int sinceCheckpoint;
 
     public PendingLikes(Path directory, int capacity, Submitter submitter) throws IOException {
         if (capacity < 1 || capacity > 100000) throw new IllegalArgumentException("invalid queue capacity");
@@ -34,7 +36,11 @@ public final class PendingLikes implements AutoCloseable {
         lock = acquired;
         try {
             if (Files.exists(directory.resolve("queue.bin"))) load();
-            else { origin = UUID.randomUUID().toString(); save(); }
+            else {
+                if (Files.exists(directory.resolve("queue.wal"))) throw new IOException("WAL without checkpoint");
+                origin = UUID.randomUUID().toString(); save();
+            }
+            replay();
         } catch (IOException | RuntimeException e) { close(); throw e; }
     }
     public static void validate(String id, String command) {
@@ -60,7 +66,7 @@ public final class PendingLikes implements AutoCloseable {
             return render(prior);
         }
         if (items.size() >= capacity) throw new IllegalStateException("queue retained-result capacity reached");
-        items.put(id, new Item(command, "")); save();
+        persist(id, new Item(command, ""));
         return "PENDING";
     }
     public synchronized String status(String expected, String id) throws IOException {
@@ -89,7 +95,8 @@ public final class PendingLikes implements AutoCloseable {
             if (!result.startsWith("OK ") && !result.startsWith("ERR ")) continue;
             synchronized (this) {
                 if (failed) throw new IOException("queue failed closed");
-                items.put(entry.getKey(), new Item(entry.getValue().command, result)); save();
+                Item current = items.get(entry.getKey());
+                if (current.result.isEmpty()) persist(entry.getKey(), new Item(entry.getValue().command, result));
             }
         }
     }
@@ -100,7 +107,7 @@ public final class PendingLikes implements AutoCloseable {
     private void save() throws IOException {
         try {
             byte[] body = Protocol.encode(out -> {
-                out.writeInt(0x504c5131); out.writeUTF(origin); out.writeInt(items.size());
+                out.writeInt(0x504c5132); out.writeUTF(origin); out.writeLong(sequence); out.writeInt(items.size());
                 for (var e : items.entrySet()) { out.writeUTF(e.getKey()); out.writeUTF(e.getValue().command); out.writeUTF(e.getValue().result); }
             });
             ByteBuffer data = ByteBuffer.allocate(body.length + 32).put(body).put(digest(body)); data.flip();
@@ -116,8 +123,11 @@ public final class PendingLikes implements AutoCloseable {
         byte[] body = Arrays.copyOf(all, all.length - 32);
         if (!MessageDigest.isEqual(digest(body), Arrays.copyOfRange(all, body.length, all.length))) throw new IOException("pending checksum mismatch");
         var in = Protocol.input(body);
-        if (in.readInt() != 0x504c5131) throw new IOException("pending format mismatch");
+        int magic = in.readInt();
+        if (magic != 0x504c5131 && magic != 0x504c5132) throw new IOException("pending format mismatch");
         origin = in.readUTF(); UUID.fromString(origin);
+        sequence = magic == 0x504c5132 ? in.readLong() : 0;
+        if (sequence < 0) throw new IOException("negative checkpoint sequence");
         int count = in.readInt();
         if (count < 0 || count > capacity) throw new IOException("pending capacity mismatch");
         for (int i = 0; i < count; i++) {
@@ -126,6 +136,74 @@ public final class PendingLikes implements AutoCloseable {
             if (items.put(id, new Item(command, result)) != null) throw new IOException("duplicate intent");
         }
         if (in.available() != 0) throw new IOException("trailing pending bytes");
+    }
+    private void persist(String id, Item item) throws IOException {
+        try {
+            if (sequence == Long.MAX_VALUE) throw new IOException("WAL sequence exhausted");
+            long next = sequence + 1;
+            byte[] body = Protocol.encode(out -> {
+                out.writeLong(next); out.writeUTF(origin); out.writeUTF(id);
+                out.writeUTF(item.command); out.writeUTF(item.result);
+            });
+            ByteBuffer record = ByteBuffer.allocate(8 + body.length + 32).putInt(body.length).putInt(~body.length).put(body).put(digest(body)); record.flip();
+            try (var wal = FileChannel.open(directory.resolve("queue.wal"), CREATE, WRITE, APPEND)) {
+                while (record.hasRemaining()) wal.write(record);
+                wal.force(true);
+            }
+            // The WAL filename itself must survive a crash before admission can be acknowledged.
+            try (var dir = FileChannel.open(directory, READ)) { dir.force(true); }
+            sequence = next; items.put(id, item);
+            if (++sinceCheckpoint >= 128) checkpoint();
+        } catch (IOException e) { failed = true; throw e; }
+    }
+    /** Retains every idempotency result; only the journal prefix is compacted. */
+    public synchronized void checkpoint() throws IOException {
+        if (failed) throw new IOException("queue failed closed");
+        save(); // Atomic, forced checkpoint covers all records before WAL truncation.
+        try {
+            try (var wal = FileChannel.open(directory.resolve("queue.wal"), CREATE, WRITE, TRUNCATE_EXISTING)) { wal.force(true); }
+            try (var dir = FileChannel.open(directory, READ)) { dir.force(true); }
+            sinceCheckpoint = 0;
+        } catch (IOException e) { failed = true; throw e; }
+    }
+    private void replay() throws IOException {
+        Path path = directory.resolve("queue.wal");
+        if (!Files.exists(path)) return;
+        long checkpointSequence = sequence, previous = -1;
+        try (var wal = FileChannel.open(path, READ, WRITE)) {
+            long good = 0, size = wal.size();
+            while (good < size) {
+                if (size - good < 8) { wal.truncate(good); wal.force(true); break; }
+                ByteBuffer header = ByteBuffer.allocate(8); readFully(wal, header); header.flip();
+                int length = header.getInt();
+                if (header.getInt() != ~length || length < 1 || length > 10000) throw new IOException("invalid WAL record length");
+                if (size - good - 8 < length + 32) { wal.truncate(good); wal.force(true); break; }
+                ByteBuffer payload = ByteBuffer.allocate(length + 32); readFully(wal, payload);
+                byte[] all = payload.array(), body = Arrays.copyOf(all, length);
+                if (!MessageDigest.isEqual(digest(body), Arrays.copyOfRange(all, length, all.length))) throw new IOException("WAL checksum mismatch");
+                var in = Protocol.input(body);
+                long entrySequence = in.readLong();
+                if (entrySequence <= 0 || (previous != -1 && entrySequence != previous + 1)
+                        || (previous == -1 && entrySequence > checkpointSequence + 1)) throw new IOException("WAL sequence gap");
+                previous = entrySequence;
+                if (!origin.equals(in.readUTF())) throw new IOException("WAL incarnation mismatch");
+                String id = in.readUTF(), command = in.readUTF(), result = in.readUTF(); validate(id, command);
+                if (in.available() != 0 || (!result.isEmpty() && !result.startsWith("OK ") && !result.startsWith("ERR ")))
+                    throw new IOException("invalid WAL outcome");
+                if (entrySequence > checkpointSequence) {
+                    if (entrySequence != sequence + 1) throw new IOException("WAL sequence gap");
+                    Item old = items.get(id);
+                    if (old == null ? !result.isEmpty() || items.size() >= capacity
+                            : !old.command.equals(command) || !old.result.isEmpty() || result.isEmpty())
+                        throw new IOException("invalid WAL transition");
+                    items.put(id, new Item(command, result)); sequence = entrySequence; sinceCheckpoint++;
+                }
+                good += 8L + length + 32;
+            }
+        }
+    }
+    private static void readFully(FileChannel channel, ByteBuffer buffer) throws IOException {
+        while (buffer.hasRemaining()) if (channel.read(buffer) < 0) throw new EOFException("truncated WAL");
     }
     @Override public void close() throws IOException {
         worker.shutdownNow();

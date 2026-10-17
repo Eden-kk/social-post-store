@@ -41,17 +41,19 @@ public final class PendingLikesTest {
         String crashOrigin;
         try (var q = new PendingLikes(crash, 2, apply)) {
             crashOrigin = q.origin(); q.enqueue(crashOrigin, "a", LIKE);
-            Files.createDirectory(crash.resolve("queue.tmp"));
+            Files.move(crash.resolve("queue.wal"), crash.resolve("queue.wal.saved"));
+            Files.createDirectory(crash.resolve("queue.wal"));
             rejects(q::retry); rejects(() -> q.status(crashOrigin, "a"));
         }
-        Files.delete(crash.resolve("queue.tmp"));
+        Files.delete(crash.resolve("queue.wal")); Files.move(crash.resolve("queue.wal.saved"), crash.resolve("queue.wal"));
         try (var q = new PendingLikes(crash, 2, apply)) {
             check(q.status(crashOrigin, "a").equals("PENDING"), "commit-before-result persists intent");
             q.retry(); check(effects.get() == 1, "same ID applied once after lost result");
-            Files.createDirectory(crash.resolve("queue.tmp"));
+            Files.move(crash.resolve("queue.wal"), crash.resolve("queue.wal.saved"));
+            Files.createDirectory(crash.resolve("queue.wal"));
             rejects(() -> q.enqueue(crashOrigin, "b", LIKE));
         }
-        Files.delete(crash.resolve("queue.tmp"));
+        Files.delete(crash.resolve("queue.wal")); Files.move(crash.resolve("queue.wal.saved"), crash.resolve("queue.wal"));
         try (var q = new PendingLikes(crash, 2, apply)) {
             check(q.status(crashOrigin, "b").equals("NOT_FOUND"), "unacknowledged failed admission absent");
         }

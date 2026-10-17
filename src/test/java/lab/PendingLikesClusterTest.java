@@ -67,14 +67,16 @@ public final class PendingLikesClusterTest {
             // Force the journal's terminal save to fail after a real Raft commit.
             for (int i = 0; i < 3; i++) if (i == n) t.isolate(i); else t.call(i, "/test/block", "" + n, null, null);
             request(t, n, "/social/likes/pending", origin, "lost-result", "LIKE\tp\tv\tphone\t1\ttrue");
-            java.nio.file.Path temp = t.root.resolve("node" + n + "/pending-likes/queue.tmp");
+            java.nio.file.Path temp = t.root.resolve("node" + n + "/pending-likes/queue.wal");
+            java.nio.file.Path saved = temp.resolveSibling("queue.wal.saved");
+            java.nio.file.Files.move(temp, saved);
             java.nio.file.Files.createDirectory(temp); t.heal();
             long end = System.nanoTime() + Duration.ofSeconds(15).toNanos(); boolean committed = false;
             while (System.nanoTime() < end) {
                 if (client.execute(UUID.randomUUID().toString(), "GET\tp", Duration.ofSeconds(5)).contains("\"likes\":2")) { committed = true; break; }
             }
             check(committed, "Raft applied before queue result save");
-            Thread.sleep(400); t.stop(n); java.nio.file.Files.delete(temp); t.start(n);
+            Thread.sleep(400); t.stop(n); java.nio.file.Files.delete(temp); java.nio.file.Files.move(saved, temp); t.start(n);
             await(t, n, origin, "lost-result", "COMMITTED\nOK LIKE");
             check(client.execute(UUID.randomUUID().toString(), "GET\tp", Duration.ofSeconds(15)).contains("\"likes\":2"), "real lost result replay exactly once");
             System.out.println("PENDING_LIKES_CLUSTER_TEST_PASSED follower routing, partition, restart, dedup, stale sequence, rejection");

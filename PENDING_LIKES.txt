@@ -23,18 +23,37 @@ Retry/status must return to this same node incarnation; no transparent failover.
 
 Persistence and delivery
 ------------------------
-PendingLikes owns data-dir/pending-likes/queue.bin and an exclusive queue.lock.
-It stores the incarnation, payload-bound IDs, complete commands and outcomes.
-SHA-256 verifies the full file on restart. A temp write is forced, atomically
-renamed, then its directory forced BEFORE admission or terminal response.
-I/O errors fail closed. A failed save never returns successful admission; if
-rename succeeded before directory force failed, the outcome is uncertain and
-the same ID must be retried after restart. There is no scalable WAL yet.
+PendingLikes owns queue.bin (checkpoint), queue.wal (write-ahead log), and an
+exclusive queue.lock. Each admission or terminal outcome appends its sequence,
+incarnation, payload-bound ID, command and exact outcome to queue.wal; the file
+and directory are forced BEFORE publishing the in-memory transition or response.
+The record has a bounded length plus its complement and a SHA-256 payload digest.
+I/O errors fail closed; a failed force may have an uncertain durable outcome,
+so retry the same ID after restart, never invent a replacement ID.
+
+Every 128 transitions (or explicit checkpoint()), all retained state and the
+covered sequence are checksummed, forced to queue.tmp, atomically renamed to
+queue.bin and directory-forced. Only THEN is queue.wal truncated and forced.
+Recovery skips checked records already covered by the checkpoint and applies
+later records in contiguous sequence. Old v1 queue.bin files remain readable;
+they gain a WAL before their first v2 checkpoint without losing the incarnation.
+Checkpoint does not expire terminal outcomes or release retained-entry capacity.
+Each append is still synchronously forced, and checkpoint still writes full state;
+no throughput or latency improvement is claimed without a benchmark.
+
+Under an interrupted-append crash model, an incomplete final header/payload is
+truncated to the last valid record before appending again. A complete corrupt
+header/payload, sequence gap, wrong incarnation or invalid transition fails closed.
+This cannot distinguish external truncation of an acknowledged file from a torn
+append; it is not protection against arbitrary disk loss or malicious modification.
 
 A single worker visits retained pending records every 300ms after a completed
 round. It submits the SAME social:<ID> and command through the local Raft node.
 Followers can forward to fixed peers through /raft/like, with both sender and
 receiver partition gates; forwarding endpoints only submit locally, not recurse.
+Each remote forwarding attempt has a 1100ms total response deadline including
+the body, a 2048-byte body cap, and cancellation on timeout or worker interruption.
+This bounds a stalled peer's effect on the next pending intent, not total queue latency.
 Raft majority/current-term rules remain unchanged. NOT_LEADER, UNKNOWN,
 transport failures retain PENDING. OK/ERR results become durable terminal state.
 Transient peer errors do not falsely reject an intent. A missing/deleted post,
@@ -67,12 +86,14 @@ Local disk loss can lose PENDING and its status. Raft commit durability is only
 that of the configured quorum, not a deployment-independent regional guarantee.
 No MQ is required here: the durable intent journal plus worker is sufficient for
 the minimal implementation. Existing view MQ is unrelated. No production auth,
-dynamic membership, queue compaction, backup, multi-region placement or SLA.
+dynamic membership, terminal-result eviction, backup, multi-region placement or SLA.
 
 Verification
 ------------
 sh build.sh
 java -cp build/classes lab.PendingLikesTest
+java -cp build/classes lab.PendingWalTest
+java -cp build/classes lab.PendingSlowPeerTest
 java -cp build/classes lab.PendingLikesClusterTest
 Unit tests: restart, payload/origin conflict, bounded admission, invalid oversized
 input, exclusive lock, terminal error/stale result, unknown retry, checksum failure,
@@ -80,4 +101,11 @@ admission-persist failure, commit-before-result-persist failure, shutdown interr
 Real three-process test: follower ingress, partition-safe pending, process restart,
 healing without requiring ingress election, duplicate exact count, 1/3/2 ordering,
 missing/deleted-post rejection, terminal restart, real Raft commit followed by forced queue
-result-save failure and replay. Failure injection uses an invalid queue.tmp directory.
+result-save failure and replay. WAL-write failure injection temporarily replaces
+queue.wal with a directory while preserving its prior durable bytes for restart.
+Checkpoint tests model installed checkpoint + old WAL, failed pre-rename checkpoint,
+torn final header/payload repair, append-after-recovery, checksum/header corruption,
+automatic checkpoint and v1 migration. These are deterministic file-state fault
+models, not hardware power-loss/fsync fault injection.
+Slow-peer test sends headers then stalls the body, verifies later intent progress,
+interruptible close, and exact 2048-byte/oversized 2049-byte response boundaries.
