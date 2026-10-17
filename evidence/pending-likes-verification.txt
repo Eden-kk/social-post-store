@@ -20,3 +20,9 @@ Other suite coverage passed: SQL, durable storage, identity, client, counter,
 delta, counter cluster, SQL-counter, social state, social cluster and three Raft
 cluster rounds. No real geographical deployment or production performance test.
 No RabbitMQ changes; broker integration was not rerun for this Java-only feature.
+
+Independent main-branch verification after integration (5e6c9c4):
+sh build.sh; PendingLikesTest; PendingLikesClusterTest all passed, exit 0.
+Real-process evidence:
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-7845877661566646062
+Independent read-only review found no remaining blocking correctness issue.
