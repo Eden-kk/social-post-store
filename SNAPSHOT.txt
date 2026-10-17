@@ -1,0 +1,63 @@
+Raft snapshot and log-prefix compaction
+======================================
+
+The fixed three-peer lab snapshots the authoritative SQL/Social state, not local
+PENDING queues or external PN-counter stores. It is not multi-region zero-loss
+storage, a scalable segmented WAL, or dynamic-membership Raft.
+
+State and trigger
+----------------
+Every 128 newly applied entries, attempt a snapshot at applied index S and term T.
+The Raft monitor serializes capture with all state-machine application. SQL table
+schemas/rows (including COUNTER schema only), post tombstones, all relationships
+(including liked=false and latest writer/sequence), counts, and every retained
+request ID's original command and exact result are captured together. Historical
+reads, rejected commands, STALE/SAME outcomes remain payload-bound and retained.
+No deduplication TTL or garbage collection is introduced.
+
+Version-2 state.bin holds local term/votedFor/commit, S/T, snapshot bytes, and the
+suffix after S in one SHA-256-protected atomic envelope. Version-1 full-log files
+load as baseIndex=0 and rewrite as version 2 on the next save; identity/dialect
+guards remain required. Legacy identity-less directories are still refused.
+
+Installation and crashes
+------------------------
+Write state.bin.tmp, force the file, atomically replace state.bin, force directory,
+then publish the new in-memory snapshot/base and release the old prefix. A failed
+disk save fails the node closed. Before replacement, old envelope/log is intact;
+after replacement, snapshot and suffix are paired in the new envelope. Recovery
+loads snapshot state/results and applies only the committed suffix to it.
+This assumes intact storage and file-force/atomic-rename semantics. A process
+exception injected after rename is not a simulation of physical power loss.
+
+All protocol indexes are absolute; array slot zero represents the snapshot S/T.
+Election freshness includes that boundary. If a peer's nextIndex is inside the
+compacted prefix, leader sends bounded InstallSnapshot rather than missing entries.
+The wire checksum covers boundary, term, leader and payload. Recipient validates,
+durably installs, then acknowledges. Matching local entry S/T preserves suffix;
+otherwise uncommitted suffix is discarded. A stale or repeated snapshot never
+rolls back applied state, but a higher incoming term is still durably recorded.
+AppendEntries resumes at S+1. Installation never replaces this node's local queue
+origin, PENDING records, counter origins or peer-ACK watermarks.
+
+Bounds and tradeoffs
+--------------------
+Single-message snapshot payload cap is 900,000 bytes; no chunking. Oversized
+automatic snapshots are skipped while committed logs remain intact, not rejected
+business writes. The explicit test-only /test/snapshot endpoint reports oversize.
+RPC responses are bounded and have a total future deadline. This is loopback-only
+trusted-peer transport, without authentication, encryption or membership changes.
+Snapshots still include all dedup results and whole state.bin is rewritten on each
+persist; this reduces retained log history, not unbounded result growth or general
+write amplification. Snapshot sizing/capture also happens under the node monitor.
+
+Verification
+------------
+SnapshotTest: state/result restore; false relationship, tombstone, historical
+read/error; duplicate committed ID; matching/conflicting suffix; repeated/stale
+higher-term install; failed install and retry; before/after-rename save faults;
+legacy state migration; corrupt state/wire/boundary rejection; large exact results;
+oversize auto-snapshot keeps all committed logs and node usable.
+ClusterTest: real JVM offline follower receives snapshot, catches up suffix,
+survives leader change, returns exact old results, and PENDING same-ID retry does
+not increment twice. Independent offline replay restores snapshot plus suffix.

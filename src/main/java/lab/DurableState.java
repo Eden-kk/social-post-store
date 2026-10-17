@@ -25,7 +25,13 @@ public final class DurableState implements AutoCloseable {
     private final Path directory;
     private final FileChannel lockChannel;
     private final FileLock lock;
+    @FunctionalInterface interface SaveFault { void at(String phase) throws IOException; }
+    private final SaveFault fault;
     public DurableState(Path directory) throws IOException {
+        this(directory, phase -> {});
+    }
+    DurableState(Path directory, SaveFault fault) throws IOException {
+        this.fault = fault;
         this.directory = directory;
         Files.createDirectories(directory);
         lockChannel = FileChannel.open(directory.resolve("node.lock"), CREATE, WRITE);
@@ -114,9 +120,12 @@ public final class DurableState implements AutoCloseable {
             while (data.hasRemaining()) file.write(data);
             file.force(true);
         }
+        fault.at("after-file-force");
         Files.move(temp, directory.resolve(name), StandardCopyOption.ATOMIC_MOVE,
                    StandardCopyOption.REPLACE_EXISTING);
+        fault.at("after-rename");
         try (var dir = FileChannel.open(directory, READ)) { dir.force(true); }
+        fault.at("after-directory-force");
     }
     @Override public void close() throws IOException {
         try { if (lock.isValid()) lock.release(); } finally { lockChannel.close(); }

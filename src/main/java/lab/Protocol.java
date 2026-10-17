@@ -14,16 +14,26 @@ public final class Protocol {
                          int commitIndex, List<Entry> entries) {}
     public record AppendReply(long term, boolean success, int matchIndex) {}
     public record Install(long term, int leader, int index, long includedTerm, byte[] state) {}
+    private static byte[] checksum(byte[] data) {
+        try { return java.security.MessageDigest.getInstance("SHA-256").digest(data); }
+        catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
     public static byte[] install(Install s) throws IOException {
-        return encode(o -> { o.writeLong(s.term()); o.writeInt(s.leader()); o.writeInt(s.index());
+        byte[] body = encode(o -> { o.writeLong(s.term()); o.writeInt(s.leader()); o.writeInt(s.index());
             o.writeLong(s.includedTerm()); o.writeInt(s.state().length); o.write(s.state()); });
+        return encode(o -> { o.write(body); o.write(checksum(body)); });
     }
     public static Install readInstall(byte[] bytes) throws IOException {
-        var in = input(bytes); long term = in.readLong(); int leader = in.readInt(), index = in.readInt();
+        if (bytes.length < 60 || bytes.length > SnapshotState.MAX_BYTES + 60) throw new IOException("invalid snapshot wire length");
+        byte[] body = Arrays.copyOf(bytes, bytes.length - 32);
+        if (!java.security.MessageDigest.isEqual(checksum(body), Arrays.copyOfRange(bytes, body.length, bytes.length)))
+            throw new IOException("snapshot transfer checksum mismatch");
+        var in = input(body); long term = in.readLong(); int leader = in.readInt(), index = in.readInt();
         long includedTerm = in.readLong(); int size = in.readInt();
         if (index <= 0 || includedTerm < 0 || includedTerm > term || size < 0
                 || size > SnapshotState.MAX_BYTES || size != in.available()) throw new IOException("invalid install snapshot");
-        return new Install(term, leader, index, includedTerm, in.readNBytes(size));
+        byte[] state = in.readNBytes(size);
+        return new Install(term, leader, index, includedTerm, state);
     }
     @FunctionalInterface public interface Writer { void write(DataOutputStream out) throws IOException; }
     public static byte[] encode(Writer writer) throws IOException {

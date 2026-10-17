@@ -31,6 +31,8 @@ public final class ClusterTest implements AutoCloseable {
             .timeout(Duration.ofSeconds(5));
         if (body == null) builder.GET();
         else {builder.POST(HttpRequest.BodyPublishers.ofString(body));
+            if (path.equals("/social/likes/pending") || path.equals("/social/likes/result"))
+                builder.header("X-Pending-Origin", call(id, "/social/likes/queue", null, null).substring("origin=".length()));
             if (requestId != null) builder.header("X-Request-ID", requestId);}
         var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) throw new AssertionError("HTTP "+response.statusCode()+": "+response.body());
@@ -144,13 +146,48 @@ public final class ClusterTest implements AutoCloseable {
             expect(sql(lead, "SELECT value FROM counters WHERE id = 1;").contains("[[18]]"), "concurrent final value");
         } finally {pool.shutdownNow();}
         converge();
+        int lagging = (lead + 1) % 3;
+        expect(call(lead, "/social", "CREATE\tsnap\tu\tcontent", "snap-post").startsWith("OK"), "snapshot social create");
+        String likeCommand = "LIKE\tsnap\tu\tw\t1\ttrue";
+        String likeResult = call(lead, "/social", likeCommand, "snap-like");
+        expect(likeResult.contains("count=1"), "snapshot like");
+        converge();
+        stop(lagging);
+        // Force a compacted boundary beyond this offline node's last log entry.
+        expect(sql(lead, "SELECT * FROM counters").startsWith("OK SELECT"), "read before snapshot");
+        call(lead, "/test/snapshot", "", null);
+        int boundary = Integer.parseInt(status(lead).get("snapshot"));
+        expect(boundary > 0, "snapshot installed on leader");
+        start(lagging); converge();
+        expect(Integer.parseInt(status(lagging).get("snapshot")) == boundary, "offline peer received InstallSnapshot");
+        // Snapshot-bearing node must remain eligible and preserve exact retries after leadership changes.
+        stop(lead);
+        survivors = new HashSet<>(Set.of(0,1,2)); survivors.remove(lead);
+        replacement = leader(survivors);
+        expect(call(replacement, "/sql", increment, "increment-once").equals("OK UPDATE 1"), "snapshot election dedup");
+        expect(call(replacement, "/sql", increment.replace("+ 1", "+ 2"), "increment-once").startsWith("ERR"), "snapshot payload binding");
+        expect(call(replacement, "/social/likes/pending", likeCommand, "snap-like").equals("PENDING"), "local pending retry admission");
+        String outcome = ""; long until = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < until) {
+            outcome = call(replacement, "/social/likes/result", "snap-like", null);
+            if (outcome.startsWith("COMMITTED")) break;
+            Thread.sleep(80);
+        }
+        expect(outcome.equals("COMMITTED\n" + likeResult), "pending retry returns precompaction exact result: " + outcome);
+        expect(call(replacement, "/social", "GET\tsnap", "snap-check").contains("\"likes\":1"), "pending retry no double count");
+        start(lead); converge();
+        System.out.println("PASS offline follower snapshot recovery, suffix catch-up and post-snapshot election retry");
         for (int i = 0; i < 3; i++) stop(i);
         for (int i = 0; i < 3; i++) {
             var engine = new SqlEngine();
             var seen = new HashSet<String>();
             try (var storage = new DurableState(root.resolve("node"+i))) {
                 var state = storage.load();
-                for (var entry : state.entries().subList(0, state.committed()))
+                if (state.baseIndex() > 0) {
+                    var restored = SnapshotState.decode(state.snapshot()); engine = restored.database();
+                    seen.addAll(restored.results().keySet());
+                }
+                for (var entry : state.entries().subList(0, state.committed() - state.baseIndex()))
                     if (!entry.requestId().isEmpty() && seen.add(entry.requestId())) engine.execute(entry.sql());
             }
             expect(engine.execute("SELECT value FROM counters WHERE id = 1;").contains("[[18]]"),

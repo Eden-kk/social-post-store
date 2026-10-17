@@ -103,15 +103,18 @@ Raft implements randomized elections, persisted votes/terms, log matching,
 conflict truncation and next/match progress for a fixed three-peer group.
 Every node persists term/vote/log/commit in a checksummed whole-state file,
 forcing the temp file, atomic replacement and directory before acknowledgement.
-On startup SQL state and dedup results are rebuilt from EMPTY by replaying only
-the durable committed prefix; there is no separately mutable persistent SQL file.
+On startup SQL/social state and dedup results restore from the authoritative
+snapshot (or EMPTY for legacy full logs), then replay only the committed suffix;
+there is no separately mutable persistent SQL file.
 This eliminates a DB-mutation/applied-index split-write window for this design.
 Command ID, original SQL and result are logically replicated via replay. IDs are
 retained indefinitely in this bounded lab, not a production dedup retention design.
 
 Limitations
-The Raft log and dedup grow without bound; each Raft durable save rewrites full state.
-No Raft snapshot/compaction, sharding, dynamic membership, Redis, ZooKeeper, TLS/auth,
+Dedup results grow without bound; automatic compaction keeps logs when snapshots
+exceed the transfer cap. Each Raft durable save still rewrites full state.
+Bounded Raft snapshot/compaction and lagging-peer installation are documented in
+SNAPSHOT.txt. No sharding, dynamic membership, Redis, ZooKeeper, TLS/auth,
 cross-machine benchmarks, linearizability history checker or performance claims.
 Normal endpoints bind only to localhost; all local peers/callers are trusted.
 --test-controls explicitly enables local partition injection; NEVER expose it.
@@ -139,7 +142,7 @@ Describe as an AI-assisted independent reconstruction/extension, dated October
 2026, only after reviewing the code and understanding the mechanisms. Can claim
 restricted SQL + Raft integration and the specific verified local tests; cannot
 claim historical integration, MySQL compatibility, production readiness,
-benchmarked performance gains, or snapshots not implemented here.
+benchmarked performance gains, or scalable/chunked snapshot transfer.
 
 Social workload extension (2026-10-16):
 Run sh social-demo.sh for the narrated three-JVM fault/recovery demonstration.
