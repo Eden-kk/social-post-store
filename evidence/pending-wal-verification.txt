@@ -1,0 +1,43 @@
+2026-10-17 — PENDING WAL/checkpoint and slow forwarding verification
+=================================================================
+Tested integrated code: f55d00c (subsequent changes are documentation only).
+Final main-checkout sh test.sh: ALL_TESTS_PASSED, EXIT=0.
+Complete local output: /tmp/social-wal-final.log
+Detached tmux session social-wal-final used pipefail and caffeinate.
+
+Passed: SQL engine, durable state, identity, client, counter state/delta/cluster,
+SQL-counter state/cluster, social state/cluster, PendingLikesTest, PendingWalTest,
+PendingSlowPeerTest, PendingLikesClusterTest, and three original Raft cluster rounds.
+No RabbitMQ code changed; real-broker tests were not rerun for this Java-only work.
+
+Slow-peer regression:
+- Original blocking InputStream read restored in an isolated temporary checkout;
+  the new stalled-body test did not complete and was terminated by an external
+  eight-second alarm (exit142). No production process was involved.
+- Fixed implementation passes stalled body timeout, next-intent progress,
+  deterministic interruption during a stalled body, 2048/2049-byte bounds,
+  same-ID recovery after the peer resumes, and exact terminal result on restart.
+
+WAL/checkpoint regression:
+- Exact retained outcome and original incarnation survive restart/compaction.
+- New checkpoint with old covered WAL replays safely; subsequent appends recover.
+- Incomplete final header and incomplete final payload are trimmed before append.
+- Corrupt checked length and complete payload corruption fail closed.
+- Automatic checkpoint after128 transitions retains all IDs and results.
+- Failed checkpoint creation leaves the old checkpoint plus WAL recoverable.
+- Legacy PLQ1 checkpoint plus new WAL recovers before and after PLQ2 checkpoint.
+- Unit and real Raft cluster tests retain the commit-before-result-persist failure
+  window: same-ID replay returns the old result and does not increment twice.
+- Origin/payload binding, retained capacity and terminal error/stale semantics
+  remain covered by existing unit and cluster tests.
+
+Independent reviewer on equivalent isolated commit2c0da91 separately compiled and
+ran all four pending-focused tests successfully (exit0), inspected persistence
+ordering and transport cancellation, and found no remaining blocking issue.
+Review caught an unguarded length-field corruption risk in the initial draft;
+the final framing checks length and its bitwise complement before tail repair.
+
+Evidence scope: local JVMs, HTTP fixtures and deterministic file-state failures.
+Not a hardware power-loss proof, exhaustive corruption detector, cross-region
+zero-loss guarantee, throughput benchmark, or Raft snapshot implementation.
+Checkpoints retain idempotency state; they do not free retained-ID capacity.

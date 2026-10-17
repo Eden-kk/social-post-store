@@ -110,8 +110,8 @@ Command ID, original SQL and result are logically replicated via replay. IDs are
 retained indefinitely in this bounded lab, not a production dedup retention design.
 
 Limitations
-Full log and dedup grow without bound; each durable save rewrites the full state.
-No snapshot/compaction, sharding, dynamic membership, Redis, ZooKeeper, TLS/auth,
+The Raft log and dedup grow without bound; each Raft durable save rewrites full state.
+No Raft snapshot/compaction, sharding, dynamic membership, Redis, ZooKeeper, TLS/auth,
 cross-machine benchmarks, linearizability history checker or performance claims.
 Normal endpoints bind only to localhost; all local peers/callers are trusted.
 --test-controls explicitly enables local partition injection; NEVER expose it.
@@ -124,6 +124,8 @@ rejected, not silently migrated. Failed initialization releases the directory lo
 The binding is configuration identity, not a globally unique cluster incarnation:
 do not reuse old directories when creating a new logical cluster on the same ports.
 The bounded tests demonstrate specific scenarios, not a proof of Raft correctness.
+The separate pending-like journal uses append-only WAL and retained-state
+checkpoints (PENDING_LIKES.txt); this does not compact the Raft log or evict IDs.
 
 Reading references (architectural inspiration, no library implementation imported)
 https://raft.github.io/raft.pdf

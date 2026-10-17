@@ -109,3 +109,5 @@ automatic checkpoint and v1 migration. These are deterministic file-state fault
 models, not hardware power-loss/fsync fault injection.
 Slow-peer test sends headers then stalls the body, verifies later intent progress,
 interruptible close, and exact 2048-byte/oversized 2049-byte response boundaries.
+After a timeout, the same intent remains PENDING; a resumed peer supplies its
+exact result, which survives local queue restart without another submission.
