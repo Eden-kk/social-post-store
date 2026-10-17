@@ -10,13 +10,19 @@ public final class PendingSlowPeerTest {
     public static void main(String[] args) throws Exception {
         var executor = Executors.newCachedThreadPool();
         var release = new CountDownLatch(1);
-        var started = new CountDownLatch(1);
+        var thirdStarted = new CountDownLatch(1);
+        var requests = new java.util.concurrent.atomic.AtomicInteger();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(executor);
         server.createContext("/raft/like", exchange -> {
+            String id = exchange.getRequestHeaders().getFirst("X-Request-ID");
+            if (id.startsWith("size-")) {
+                byte[] body = ("OK " + "x".repeat(Integer.parseInt(id.substring(5)) - 3)).getBytes();
+                exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close(); return;
+            }
             exchange.sendResponseHeaders(200, 0);
             exchange.getResponseBody().write("OK ".getBytes()); exchange.getResponseBody().flush();
-            started.countDown();
+            if (requests.incrementAndGet() == 3) thirdStarted.countDown();
             try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             exchange.close();
         });
@@ -25,6 +31,10 @@ public final class PendingSlowPeerTest {
         try (var node = new RaftNode(1, Map.of(1, URI.create("http://localhost:1"), 2, url,
                 3, URI.create("http://localhost:2")), Files.createTempDirectory("slow-raft-"))) {
             node.block(Set.of(3));
+            if (node.pendingLike("size-2048", "LIKE\tp\tu\tw\t1\ttrue").length() != 2048)
+                throw new AssertionError("2048 byte boundary rejected");
+            if (!node.pendingLike("size-2049", "LIKE\tp\tu\tw\t1\ttrue").startsWith("UNKNOWN"))
+                throw new AssertionError("oversized body accepted");
             long before = System.nanoTime();
             String result = node.pendingLike("slow", "LIKE\tp\tu\tw\t1\ttrue");
             if (!result.startsWith("UNKNOWN") || TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before) > 3000)
@@ -36,7 +46,7 @@ public final class PendingSlowPeerTest {
                 queue.retry();
                 if (!queue.status(queue.origin(), "next").startsWith("COMMITTED")) throw new AssertionError("next intent starved");
                 queue.start();
-                Thread.sleep(300);
+                if (!thirdStarted.await(3, TimeUnit.SECONDS)) throw new AssertionError("worker did not enter stalled body");
                 before = System.nanoTime();
             }
             if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before) > 2500) throw new AssertionError("close blocked");
