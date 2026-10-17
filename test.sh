@@ -12,6 +12,8 @@ java -cp build/classes lab.CounterClusterTest
 java -cp build/classes lab.SqlCounterTest
 java -cp build/classes lab.SqlCounterClusterTest
 java -cp build/classes lab.SocialStateTest
+java -cp build/classes lab.PendingLikesTest
+java -cp build/classes lab.PendingLikesClusterTest
 java -cp build/classes lab.SocialClusterTest
 for round in 1 2 3; do
     echo "CLUSTER_ROUND=$round"

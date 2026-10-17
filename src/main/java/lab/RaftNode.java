@@ -139,6 +139,31 @@ public final class RaftNode implements AutoCloseable {
             "\ncommitted="+committed+"\napplied="+applied+"\nlast="+lastIndex()+"\nfailed="+failed+"\n";
     }
     public void block(Set<Integer> ids) { blocked.clear(); blocked.addAll(ids); }
+    /** Queue forwarding obeys both endpoints' simulated partition gates; never forwards recursively. */
+    public String pendingLike(String requestId, String command) throws Exception {
+        PendingLikes.validate(requestId, command);
+        String local = submit("social:" + requestId, SocialState.PREFIX + command, 700);
+        if (local.startsWith("OK ") || local.startsWith("ERR ")) return local;
+        for (int peer : peers.keySet()) if (peer != id && !blocked.contains(peer)) {
+            try {
+                var request = HttpRequest.newBuilder(peers.get(peer).resolve("/raft/like"))
+                    .timeout(Duration.ofMillis(1100)).header("X-Raft-Peer", "" + id)
+                    .header("X-Request-ID", requestId).POST(HttpRequest.BodyPublishers.ofString(command)).build();
+                var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                try (var body = response.body()) {
+                    byte[] bytes = body.readNBytes(2049);
+                    String result = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                    if (response.statusCode() == 200 && bytes.length <= 2048 && (result.startsWith("OK ") || result.startsWith("ERR ")))
+                        return result;
+                }
+            } catch (IOException e) { /* Retry later with the identical request and body. */ }
+        }
+        return "UNKNOWN retry same request_id";
+    }
+    public String forwardedLike(int peer, String requestId, String command) throws Exception {
+        checkPeer(peer); PendingLikes.validate(requestId, command);
+        return submit("social:" + requestId, SocialState.PREFIX + command, 700);
+    }
     private byte[] rpc(int peer, String path, byte[] body) throws Exception {
         if (blocked.contains(peer)) throw new IOException("injected partition");
         var request = HttpRequest.newBuilder(peers.get(peer).resolve(path))

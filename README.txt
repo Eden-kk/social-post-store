@@ -10,6 +10,9 @@ durable dedup plus PN-counter changed-key replication and low-frequency full rep
 SOCIAL_API.txt for the social workload. Optional RabbitMQ view ingestion adds a
 Python adapter, not another database: see MQ_API.txt and sh mq-demo.sh for its
 real-broker restart, backlog, redelivery and origin-pinning tests.
+Optional durable LIKE intent admission/status is documented in PENDING_LIKES.txt:
+local PENDING survives process restart, while Raft still decides final outcomes.
+It does not claim pending survives permanent loss of the accepting node's disk.
 
 Requirements: JDK 17+, POSIX shell. Tested locally using OpenJDK 23.0.2 with
 javac --release 17; no Maven, Gradle or external dependencies for the Java core.

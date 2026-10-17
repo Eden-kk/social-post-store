@@ -22,6 +22,7 @@ public final class Main {
             peers.put(i, URI.create("http://127.0.0.1:"+port));
         }
         var node = new RaftNode(id, peers, Path.of(args[1]));
+        var pendingLikes = new PendingLikes(Path.of(args[1]).resolve("pending-likes"), 10000, node::pendingLike);
         var counter = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("counter"));
         var sqlCounter = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("sql-counter"), "/sql-counter/merge");
         var views = new lab.counter.CounterNode(id, peers, Path.of(args[1]).resolve("social-views"), "/social/views/merge");
@@ -33,6 +34,8 @@ public final class Main {
                 String path = exchange.getRequestURI().getPath(); byte[] response;
                 if (path.equals("/status") && exchange.getRequestMethod().equals("GET")) {
                     response = node.status().getBytes(StandardCharsets.UTF_8);
+                } else if (path.equals("/social/likes/queue") && exchange.getRequestMethod().equals("GET")) {
+                    response = ("origin=" + pendingLikes.origin()).getBytes(StandardCharsets.UTF_8);
                 } else if (path.equals("/counter/status") && exchange.getRequestMethod().equals("GET")) {
                     response = counter.status().getBytes(StandardCharsets.UTF_8);
                 } else if (path.equals("/sql-counter/status") && exchange.getRequestMethod().equals("GET")) {
@@ -44,6 +47,17 @@ public final class Main {
                     byte[] body = exchange.getRequestBody().readNBytes(1_048_577);
                     if (body.length > 1_048_576) throw new IllegalArgumentException("body too large");
                     switch (path) {
+                        case "/social/likes/pending" -> response = pendingLikes.enqueue(
+                            exchange.getRequestHeaders().getFirst("X-Pending-Origin"),
+                            exchange.getRequestHeaders().getFirst("X-Request-ID"),
+                            new String(body, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
+                        case "/social/likes/result" -> response = pendingLikes.status(
+                            exchange.getRequestHeaders().getFirst("X-Pending-Origin"),
+                            new String(body, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
+                        case "/raft/like" -> response = node.forwardedLike(
+                            Integer.parseInt(exchange.getRequestHeaders().getFirst("X-Raft-Peer")),
+                            exchange.getRequestHeaders().getFirst("X-Request-ID"),
+                            new String(body, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
                         case "/social" -> {
                             String key = exchange.getRequestHeaders().getFirst("X-Request-ID");
                             if (key == null || key.isBlank() || key.length() > 120
@@ -131,12 +145,13 @@ public final class Main {
             catch (Exception e) { send(exchange, 503, ("unavailable: "+e.getClass().getSimpleName()).getBytes(StandardCharsets.UTF_8)); }
         });
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            server.stop(0); workers.shutdownNow(); try {node.close();} catch (IOException ignored) {}
+            server.stop(0); workers.shutdownNow(); try {pendingLikes.close();} catch (IOException ignored) {}
+            try {node.close();} catch (IOException ignored) {}
             try {counter.close();} catch (IOException ignored) {}
             try {sqlCounter.close();} catch (IOException ignored) {}
             try {views.close();} catch (IOException ignored) {}
         }));
-        server.start(); node.start(); counter.start(); sqlCounter.start(); views.start(); System.out.println("STARTED node="+id);
+        server.start(); node.start(); counter.start(); sqlCounter.start(); views.start(); pendingLikes.start(); System.out.println("STARTED node="+id);
     }
     private static void send(HttpExchange exchange, int code, byte[] body) throws IOException {
         exchange.sendResponseHeaders(code, body.length);

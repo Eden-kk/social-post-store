@@ -1,0 +1,83 @@
+Durable pending likes (local prototype)
+======================================
+Purpose: accept a LIKE intent on a partitioned node without falsely declaring a
+Raft commit. Local durable admission is not proof of cross-region durability.
+The fixed three JVMs simulate nodes; no physical-region or high-QPS claim.
+
+HTTP API (loopback demo, no authentication)
+------------------------------------------
+GET /social/likes/queue -> origin=<UUID>
+POST /social/likes/pending
+  X-Pending-Origin: original queue UUID
+  X-Request-ID: unique action ID, reuse unchanged for retries
+  body: LIKE<TAB>post<TAB>user<TAB>writer<TAB>positive_sequence<TAB>true|false
+Response: PENDING, or the retained terminal result on an identical retry.
+POST /social/likes/result
+  X-Pending-Origin: original queue UUID
+  body: request ID
+Response: PENDING | NOT_FOUND | COMMITTED\n<exact OK result> |
+          REJECTED\n<exact ERR result>.
+HTTP 200 carries these application statuses; wrong origin/payload is 400,
+storage failure or retained-capacity exhaustion is 503, not accepted PENDING.
+Retry/status must return to this same node incarnation; no transparent failover.
+
+Persistence and delivery
+------------------------
+PendingLikes owns data-dir/pending-likes/queue.bin and an exclusive queue.lock.
+It stores the incarnation, payload-bound IDs, complete commands and outcomes.
+SHA-256 verifies the full file on restart. A temp write is forced, atomically
+renamed, then its directory forced BEFORE admission or terminal response.
+I/O errors fail closed. A failed save never returns successful admission; if
+rename succeeded before directory force failed, the outcome is uncertain and
+the same ID must be retried after restart. There is no scalable WAL yet.
+
+A single worker visits retained pending records every 300ms after a completed
+round. It submits the SAME social:<ID> and command through the local Raft node.
+Followers can forward to fixed peers through /raft/like, with both sender and
+receiver partition gates; forwarding endpoints only submit locally, not recurse.
+Raft majority/current-term rules remain unchanged. NOT_LEADER, UNKNOWN,
+transport failures retain PENDING. OK/ERR results become durable terminal state.
+Transient peer errors do not falsely reject an intent. A missing/deleted post,
+writer mismatch, equal-sequence payload conflict or ID conflict CAN reject it.
+
+Crash windows
+-------------
+Before journal durable: no PENDING acknowledgement. After journal durable but
+before submit: restart retries. After Raft commit but before journal result save:
+restart resubmits the same ID; Raft's committed payload/result dedup avoids a
+second effect. After terminal save but lost HTTP reply: retry returns retained
+result. A persisted intent does not imply its desired state eventually wins:
+OK STALE and OK SAME are terminal acknowledgements, with their exact result
+exposed; a fresh GET_LIKE is necessary to query current authoritative state.
+
+Ordering and capacity
+---------------------
+event ID identifies retries; writer + positive sequence identifies logical order;
+desired boolean distinguishes like/cancel. Existing SocialState atomically applies
+the relationship and count delta. Sequence 1=true,3=true,2=false ends true/count1.
+This is not multi-device arbitration. One writer binds the relationship.
+Queue retains terminal entries indefinitely for payload binding (no eviction,
+expiry or cancel). At 10000 total entries NEW intents reject; existing retry and
+status still work. This bounds storage, not sustained throughput. Clients must
+not silently create a fresh ID after an ambiguous result. No UI or status push.
+
+Boundaries
+----------
+Local disk loss can lose PENDING and its status. Raft commit durability is only
+that of the configured quorum, not a deployment-independent regional guarantee.
+No MQ is required here: the durable intent journal plus worker is sufficient for
+the minimal implementation. Existing view MQ is unrelated. No production auth,
+dynamic membership, queue compaction, backup, multi-region placement or SLA.
+
+Verification
+------------
+sh build.sh
+java -cp build/classes lab.PendingLikesTest
+java -cp build/classes lab.PendingLikesClusterTest
+Unit tests: restart, payload/origin conflict, bounded admission, invalid oversized
+input, exclusive lock, terminal error/stale result, unknown retry, checksum failure,
+admission-persist failure, commit-before-result-persist failure, shutdown interrupt.
+Real three-process test: follower ingress, partition-safe pending, process restart,
+healing without requiring ingress election, duplicate exact count, 1/3/2 ordering,
+missing/deleted-post rejection, terminal restart, real Raft commit followed by forced queue
+result-save failure and replay. Failure injection uses an invalid queue.tmp directory.

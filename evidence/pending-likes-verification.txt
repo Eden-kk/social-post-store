@@ -1,0 +1,22 @@
+2026-10-16 durable pending likes verification
+==========================================
+Full sh test.sh run: ALL_TESTS_PASSED, EXIT=0.
+Local complete output: /tmp/pending-likes-regression.log
+Run persisted in tmux pending-likes-regression with pipefail and caffeinate.
+
+New PendingLikesTest: passed validation/size, duplicate/payload binding, origin,
+capacity retention, storage lock, restart, terminal stale/error, unknown retry,
+checksum rejection, failed admission persistence, committed-result save failure,
+shutdown interrupt stops before next intent.
+
+New PendingLikesClusterTest: passed real three local JVM tests for follower
+ingress, partition-respecting admission, process restart, healing and forwarding,
+exact duplicate count, seq1/3/2, missing/deleted post rejection, terminal restart,
+real committed result followed by forced queue persistence failure and retry.
+Evidence directory (local only):
+/var/folders/6n/d6rlmvm17530yf2ss4fmbk1m0000gn/T/counter-cluster-4543584148798423241
+
+Other suite coverage passed: SQL, durable storage, identity, client, counter,
+delta, counter cluster, SQL-counter, social state, social cluster and three Raft
+cluster rounds. No real geographical deployment or production performance test.
+No RabbitMQ changes; broker integration was not rerun for this Java-only feature.
