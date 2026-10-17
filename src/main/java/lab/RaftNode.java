@@ -149,14 +149,16 @@ public final class RaftNode implements AutoCloseable {
                 var request = HttpRequest.newBuilder(peers.get(peer).resolve("/raft/like"))
                     .timeout(Duration.ofMillis(1100)).header("X-Raft-Peer", "" + id)
                     .header("X-Request-ID", requestId).POST(HttpRequest.BodyPublishers.ofString(command)).build();
-                var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-                try (var body = response.body()) {
-                    byte[] bytes = body.readNBytes(2049);
+                var pending = client.sendAsync(request, info -> new BoundedHttpBody(2048));
+                try {
+                    var response = pending.get(1100, TimeUnit.MILLISECONDS);
+                    byte[] bytes = response.body();
                     String result = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
                     if (response.statusCode() == 200 && bytes.length <= 2048 && (result.startsWith("OK ") || result.startsWith("ERR ")))
                         return result;
-                }
-            } catch (IOException e) { /* Retry later with the identical request and body. */ }
+                } catch (TimeoutException | ExecutionException e) { /* Same-ID retry remains safe. */ }
+                finally { pending.cancel(true); }
+            } catch (java.io.UncheckedIOException e) { /* Retry later with the identical request and body. */ }
         }
         return "UNKNOWN retry same request_id";
     }
