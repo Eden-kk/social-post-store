@@ -1,0 +1,25 @@
+Raft snapshot verification — 2026-10-17
+=====================================
+Implementation commits: 710dd50, 348a212 (main).
+Main: sh test.sh completed ALL_TESTS_PASSED, EXIT=0.
+This includes SnapshotTest and three real multi-JVM ClusterTest rounds plus
+the existing regression suite. Local full output: /tmp/social-snapshot-final.log.
+Reproduce: sh test.sh from this repository with its documented JDK prerequisites.
+
+Independent isolated-worktree review of equivalent c1645db:
+sh build.sh; SnapshotTest; DurableStateTest; ClusterTest all passed.
+No blocking findings. An additional future enhancement is to force the exact
+snapshot-installed follower to win the subsequent election; current cluster tests
+allow either surviving peer to win and independently verify installed-state recovery.
+
+Covered: snapshot restore with exact dedup results and payload binding; historical
+reads/errors; false relationships/sequence and tombstones; absolute log indexes;
+matching/conflicting suffix; stale/higher-term installation; failed installation
+and retry; save-phase exception/restart; checksums; legacy migration; large results;
+oversized automatic snapshot skip; offline follower installation and suffix catch-up;
+leader change and PENDING same-ID retry without an additional like effect.
+
+Limits: injected exceptions/process failures, not physical power-cut experiments.
+Fixed three JVMs on one host, not real regional failure or throughput measurements.
+RabbitMQ was not changed or revalidated in this Raft-focused run.
+See SNAPSHOT.txt for storage, transport and dedup retention limits.

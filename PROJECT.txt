@@ -5,7 +5,8 @@ Goal: local three-process replicated restricted SQL database using Java 17+.
 No external dependencies. Fixed membership, majority commit, persisted vote/term
 and log, ordered deterministic SQL execution, replicated request deduplication,
 log-ordered reads, crash/restart and partition integration tests.
-Initial storage uses full-log recovery, with no snapshot compaction. No sharding,
+Storage now supports authoritative snapshots plus retained log suffix recovery.
+See SNAPSHOT.txt for compaction, follower installation and retained-result semantics. No sharding,
 transactions across nodes/shards, authentication or public-network deployment.
 Preserve original coursework and other career projects; no resume submission.
 
@@ -14,5 +15,5 @@ Source is entirely new AI-assisted work. No original coursework files modified.
 Implementation includes a custom restricted SQL state machine and custom Java
 Raft implementation, not SOFAJRaft/rqlite libraries. Reading references are
 credited in README.txt; a static independent review checked safety boundaries.
-Whole-log recovery deliberately defers snapshot/compaction. Do not describe this
-MVP as fulfilling every future feature in the earlier theoretical design.
+Snapshot compaction retains all request results; it is not dedup garbage collection.
+Do not describe this MVP as fulfilling every future feature in the theoretical design.

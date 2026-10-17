@@ -36,8 +36,11 @@ lose accepted data. Counter retries cannot transparently move to another origin.
 Convergence requires resumed delivery and merged state within capacity. Whole-state
 replication is capped at 900,000 bytes and local request retention at 100,000 IDs.
 No counter reset/delete, mixed scalar rows, schema changes or foreign keys.
-No snapshots, log compaction, dynamic membership, sharding, authentication, external
-broker, physical multi-region validation or production throughput claim.
+This original delivery predates the extensions documented in SNAPSHOT.txt,
+PENDING_LIKES.txt and MQ_API.txt. Those add bounded Raft snapshot/compaction,
+local pending likes and optional view-ingress RabbitMQ, respectively.
+Still no dynamic membership, sharding, authentication, physical multi-region
+validation or production throughput claim.
 Fresh data directories and same-version peers only; no rolling migration. Never
 manually add a dialect marker to legacy logs. Test controls stay loopback-only.
 Scenario tests are evidence for covered cases, not a formal Raft correctness proof.

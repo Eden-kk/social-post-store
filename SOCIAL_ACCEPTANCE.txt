@@ -32,8 +32,10 @@ Evidence gates
 - Independent review of cross-store races, retry semantics and deletion scope.
 
 Explicit non-goals
-OR-Set/real MQ, transparent cross-origin view dedup, general multi-device last-click
-ordering, PENDING job scheduling, TTL dedup reclamation, sharding, snapshots,
+Later extensions supersede the original exclusion of MQ/PENDING/snapshots:
+see MQ_API.txt, PENDING_LIKES.txt and SNAPSHOT.txt for their exact scoped contracts.
+Remaining non-goals: OR-Set, transparent cross-origin view dedup, general multi-device last-click
+ordering, TTL dedup reclamation, sharding,
 production authentication, physical regions, one-minute RPO or zero-loss local
 acknowledgment, high-QPS claims. Future design material must be labeled separately.
 An isolated stale replica may accept views after a remote delete; never claim

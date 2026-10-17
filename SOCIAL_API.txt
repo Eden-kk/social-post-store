@@ -98,18 +98,21 @@ View retries after the local tombstone is known are rejected by admission before
 dedup lookup; that rejection does not mean the original event was never counted.
 
 Persistence and compatibility:
-Social commands share the Raft committed prefix; restart into an empty state
-machine reconstructs posts, relationships, exact aggregate and operation results.
+Social commands share the Raft committed prefix; restart restores the authoritative
+snapshot and applies the committed suffix to reconstruct posts, relationships,
+exact aggregate and retained operation results (SNAPSHOT.txt).
 Views restore their separate local state and resume anti-entropy. Neither read
 combines the two stores atomically. New dialect minisql-social-v2 rejects existing
 minisql-counter-v1 directories instead of reinterpreting historically rejected
 commands. No automatic migration and no mixed-version cluster are supported.
 
-Delivery scope: fixed three local JVMs, no real datacenters, sharding, snapshot
-compaction, request-ID reclamation, PENDING worker, OR-Set, production auth,
+Delivery scope: fixed three local JVMs, no real datacenters, sharding,
+request-ID reclamation, OR-Set, production auth,
 one-minute RPO or high-QPS guarantee. Whole-state disk replacement and periodic full
 replication still limit throughput; see DELTA_SYNC.txt for the incremental path. Concurrent-client tests
 demonstrate correctness only, not a capacity benchmark. Region-level durability
 would require independent failure domains and additional deployment verification.
 Optional view-only RabbitMQ ingress is documented separately in MQ_API.txt; the
 base social demo does not require or exercise that broker.
+Optional local durable likes admission/status is documented in PENDING_LIKES.txt.
+Installing a Raft snapshot does not replace that local queue or any PN-counter store.
