@@ -115,6 +115,14 @@ public final class Main {
                             var reply = node.append(readAppend(body));
                             response = encode(o -> {o.writeLong(reply.term()); o.writeBoolean(reply.success()); o.writeInt(reply.matchIndex());});
                         }
+                        case "/raft/snapshot" -> {
+                            var reply = node.install(readInstall(body));
+                            response = encode(o -> {o.writeLong(reply.term()); o.writeBoolean(reply.success()); o.writeInt(reply.matchIndex());});
+                        }
+                        case "/test/snapshot" -> {
+                            if (args.length != 4 || !args[3].equals("--test-controls")) {send(exchange, 404, new byte[0]); return;}
+                            node.takeSnapshot(); response = "OK".getBytes(StandardCharsets.UTF_8);
+                        }
                         case "/sql" -> {
                             String key = exchange.getRequestHeaders().getFirst("X-Request-ID");
                             if (key == null) throw new IllegalArgumentException("X-Request-ID required");

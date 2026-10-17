@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 sh build.sh
 java -cp build/classes lab.SqlEngineTest
 java -cp build/classes lab.DurableStateTest
+java -cp build/classes lab.SnapshotTest
 java -cp build/classes lab.IdentityTest
 java -cp build/classes lab.SqlClientTest
 java -cp build/classes lab.CounterTest

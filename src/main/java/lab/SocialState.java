@@ -17,6 +17,41 @@ public final class SocialState {
     }
     private final Map<String, Post> posts = new HashMap<>();
 
+    synchronized void writeSnapshot(java.io.DataOutputStream out) throws java.io.IOException {
+        out.writeInt(posts.size());
+        for (var entry : new java.util.TreeMap<>(posts).entrySet()) {
+            Protocol.text(out, entry.getKey()); Post p = entry.getValue();
+            Protocol.text(out, p.owner); Protocol.text(out, p.content);
+            out.writeLong(p.version); out.writeLong(p.likes); out.writeBoolean(p.deleted);
+            out.writeInt(p.relationships.size());
+            for (var relation : new java.util.TreeMap<>(p.relationships).entrySet()) {
+                Protocol.text(out, relation.getKey()); Like l = relation.getValue();
+                Protocol.text(out, l.writer()); out.writeLong(l.sequence()); out.writeBoolean(l.liked());
+            }
+        }
+    }
+    static SocialState readSnapshot(java.io.DataInputStream in) throws java.io.IOException {
+        SocialState state = new SocialState(); int count = SnapshotState.count(in);
+        try {
+            for (int i = 0; i < count; i++) {
+                String id = identifier(Protocol.text(in));
+                Post p = new Post(identifier(Protocol.text(in)), content(Protocol.text(in)));
+                p.version = in.readLong(); p.likes = in.readLong(); p.deleted = in.readBoolean();
+                int size = SnapshotState.count(in); long likes = 0;
+                for (int j = 0; j < size; j++) {
+                    String uid = identifier(Protocol.text(in)), writer = identifier(Protocol.text(in));
+                    long seq = in.readLong(); boolean liked = in.readBoolean();
+                    if (seq <= 0 || p.relationships.put(uid, new Like(writer, seq, liked)) != null)
+                        throw new java.io.IOException("invalid relationship snapshot");
+                    if (liked) likes++;
+                }
+                if (p.version <= 0 || p.likes != likes || state.posts.put(id, p) != null)
+                    throw new java.io.IOException("invalid post snapshot");
+            }
+        } catch (IllegalArgumentException e) { throw new java.io.IOException("invalid social snapshot", e); }
+        return state;
+    }
+
     public static String identifier(String value) {
         if (value == null || !value.matches("[A-Za-z0-9_-]{1,64}"))
             throw new IllegalArgumentException("identifier must be 1-64 ASCII letters/digits/_/-");

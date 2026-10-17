@@ -8,16 +8,16 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import static lab.Protocol.*;
+import lab.SnapshotState.Result;
 
 /** Fixed-membership educational Raft. All protocol state is guarded by this. */
 public final class RaftNode implements AutoCloseable {
-    private record Result(String sql, String result) {}
     private final int id;
     private final Map<Integer, URI> peers;
     private final DurableState storage;
     private final List<Entry> log = new ArrayList<>();
-    private final SqlEngine database = new SqlEngine();
-    private final SocialState social = new SocialState();
+    private SqlEngine database = new SqlEngine();
+    private SocialState social = new SocialState();
     private final Map<String, Result> results = new HashMap<>();
     private final Map<Integer, Integer> next = new HashMap<>(), matched = new HashMap<>();
     private final Set<Integer> blocked = ConcurrentHashMap.newKeySet();
@@ -25,6 +25,8 @@ public final class RaftNode implements AutoCloseable {
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
     private long term, electionDeadline, lastHeartbeat;
     private int votedFor = -1, committed, applied, leader = -1;
+    private int baseIndex;
+    private byte[] snapshot = new byte[0];
     private String role = "follower";
     private volatile boolean failed;
 
@@ -36,7 +38,10 @@ public final class RaftNode implements AutoCloseable {
             storage.bindIdentity(id, this.peers);
             storage.bindSqlDialect();
             var state = storage.load(); term = state.term(); votedFor = state.votedFor();
-            committed = state.committed(); log.add(new Entry(0, "", "")); log.addAll(state.entries());
+            committed = state.committed(); baseIndex = state.baseIndex(); snapshot = state.snapshot();
+            log.add(new Entry(state.baseTerm(), "", "")); log.addAll(state.entries());
+            if (baseIndex > 0) restore(snapshot);
+            applied = baseIndex;
             applyCommitted(); resetElection();
         } catch (IOException | RuntimeException e) {
             timer.shutdownNow();
@@ -53,13 +58,19 @@ public final class RaftNode implements AutoCloseable {
         if (failed) throw new IllegalStateException("Raft metadata unavailable");
         social.requireLocallyActive(post);
     }
-    private int lastIndex() { return log.size() - 1; }
+    private int lastIndex() { return baseIndex + log.size() - 1; }
+    private Entry at(int index) { return log.get(index - baseIndex); }
+    private void restore(byte[] bytes) throws IOException {
+        var restored = SnapshotState.decode(bytes);
+        database = restored.database(); social = restored.social();
+        results.clear(); results.putAll(restored.results());
+    }
     private void resetElection() {
         electionDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(
             ThreadLocalRandom.current().nextLong(1000, 1800));
     }
     private void persist() throws IOException {
-        try { storage.save(new DurableState.State(term, votedFor, committed,
+        try { storage.save(new DurableState.State(term, votedFor, committed, baseIndex, log.get(0).term(), snapshot,
                                                   new ArrayList<>(log.subList(1, log.size())))); }
         catch (IOException e) { failed = true; notifyAll(); throw e; }
     }
@@ -69,8 +80,8 @@ public final class RaftNode implements AutoCloseable {
     }
     public synchronized VoteReply vote(Vote request) throws IOException {
         checkPeer(request.candidate()); higherTerm(request.term());
-        boolean fresh = request.lastTerm() > log.get(lastIndex()).term() ||
-            (request.lastTerm() == log.get(lastIndex()).term() && request.lastIndex() >= lastIndex());
+        boolean fresh = request.lastTerm() > at(lastIndex()).term() ||
+            (request.lastTerm() == at(lastIndex()).term() && request.lastIndex() >= lastIndex());
         boolean grant = request.term() == term && (votedFor == -1 || votedFor == request.candidate()) && fresh;
         if (grant) { votedFor = request.candidate(); persist(); resetElection(); }
         return new VoteReply(term, grant);
@@ -80,20 +91,20 @@ public final class RaftNode implements AutoCloseable {
         if (request.term() < term) return new AppendReply(term, false, lastIndex());
         role = "follower"; leader = request.leader(); resetElection(); notifyAll();
         int prev = request.previousIndex();
-        if (prev < 0 || prev > lastIndex() || log.get(prev).term() != request.previousTerm())
+        if (prev < baseIndex || prev > lastIndex() || at(prev).term() != request.previousTerm())
             return new AppendReply(term, false, lastIndex());
         int position = prev;
         for (Entry e : request.entries()) {
             position++;
-            if (position <= lastIndex() && log.get(position).term() != e.term()) {
+            if (position <= lastIndex() && at(position).term() != e.term()) {
                 if (position <= committed) { failed = true; throw new IOException("committed prefix conflict"); }
-                log.subList(position, log.size()).clear();
+                log.subList(position - baseIndex, log.size()).clear();
             }
             if (position > lastIndex()) log.add(e);
         }
         // Only the prefix proven consistent by this RPC can advance commitment.
         committed = Math.max(committed, Math.min(request.commitIndex(), position));
-        persist(); applyCommitted();
+        persist(); applyCommitted(); maybeSnapshot();
         return new AppendReply(term, true, position);
     }
     private void checkPeer(int peer) throws IOException {
@@ -101,7 +112,7 @@ public final class RaftNode implements AutoCloseable {
     }
     private void applyCommitted() {
         while (applied < committed) {
-            Entry e = log.get(++applied);
+            Entry e = at(++applied);
             if (e.requestId().isEmpty()) continue; // Leader's current-term barrier.
             Result old = results.get(e.requestId());
             if (old == null) results.put(e.requestId(), new Result(e.sql(),
@@ -109,6 +120,46 @@ public final class RaftNode implements AutoCloseable {
                     ? social.execute(e.sql().substring(SocialState.PREFIX.length())) : database.execute(e.sql())));
         }
         // Rebuild on restart from the persisted committed prefix, never replay onto an old DB.
+    }
+    /** A bounded optimization: retaining logs remains correct if the snapshot is too large. */
+    private void maybeSnapshot() throws IOException {
+        if (applied - baseIndex < 128) return;
+        byte[] bytes;
+        try { bytes = SnapshotState.encode(database, social, results); }
+        catch (SnapshotState.TooLarge tooLarge) { return; }
+        compact(bytes);
+    }
+    public synchronized void takeSnapshot() throws IOException {
+        if (failed) throw new IOException("node storage failed");
+        if (applied > baseIndex) compact(SnapshotState.encode(database, social, results));
+    }
+    private void compact(byte[] bytes) throws IOException {
+        int index = applied; long includedTerm = at(index).term();
+        var suffix = new ArrayList<>(log.subList(index - baseIndex + 1, log.size()));
+        try { storage.save(new DurableState.State(term, votedFor, committed, index, includedTerm, bytes, suffix)); }
+        catch (IOException e) { failed = true; notifyAll(); throw e; }
+        log.clear(); log.add(new Entry(includedTerm, "", "")); log.addAll(suffix);
+        baseIndex = index; snapshot = bytes;
+    }
+    public synchronized AppendReply install(Install request) throws IOException {
+        checkPeer(request.leader()); higherTerm(request.term());
+        if (request.term() < term) return new AppendReply(term, false, lastIndex());
+        if (request.index() <= 0 || request.includedTerm() < 0 || request.includedTerm() > request.term())
+            throw new IOException("invalid snapshot boundary");
+        var restored = SnapshotState.decode(request.state());
+        role = "follower"; leader = request.leader(); resetElection(); notifyAll();
+        if (request.index() <= applied) return new AppendReply(term, true, request.index());
+        boolean matches = request.index() <= lastIndex() && at(request.index()).term() == request.includedTerm();
+        if (!matches && request.index() <= committed) throw new IOException("committed snapshot conflict");
+        var suffix = matches ? new ArrayList<>(log.subList(request.index() - baseIndex + 1, log.size())) : new ArrayList<Entry>();
+        int newCommit = Math.max(committed, request.index());
+        try { storage.save(new DurableState.State(term, votedFor, newCommit, request.index(), request.includedTerm(), request.state(), suffix)); }
+        catch (IOException e) { failed = true; notifyAll(); throw e; }
+        database = restored.database(); social = restored.social(); results.clear(); results.putAll(restored.results());
+        baseIndex = request.index(); snapshot = request.state().clone(); applied = baseIndex; committed = newCommit;
+        log.clear(); log.add(new Entry(request.includedTerm(), "", "")); log.addAll(suffix);
+        applyCommitted();
+        return new AppendReply(term, true, baseIndex);
     }
     public synchronized String submit(String requestId, String sql, long timeoutMs) throws Exception {
         if (failed) throw new IOException("node storage failed");
@@ -136,7 +187,7 @@ public final class RaftNode implements AutoCloseable {
     }
     public synchronized String status() {
         return "id="+id+"\nrole="+role+"\nterm="+term+"\nleader="+leader+
-            "\ncommitted="+committed+"\napplied="+applied+"\nlast="+lastIndex()+"\nfailed="+failed+"\n";
+            "\ncommitted="+committed+"\napplied="+applied+"\nlast="+lastIndex()+"\nsnapshot="+baseIndex+"\nfailed="+failed+"\n";
     }
     public void block(Set<Integer> ids) { blocked.clear(); blocked.addAll(ids); }
     /** Queue forwarding obeys both endpoints' simulated partition gates; never forwards recursively. */
@@ -170,9 +221,12 @@ public final class RaftNode implements AutoCloseable {
         if (blocked.contains(peer)) throw new IOException("injected partition");
         var request = HttpRequest.newBuilder(peers.get(peer).resolve(path))
             .timeout(Duration.ofMillis(250)).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
-        var response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
-        if (response.statusCode() != 200) throw new IOException("peer rejected");
-        return response.body();
+        var pending = client.sendAsync(request, info -> new BoundedHttpBody(1_048_576));
+        try {
+            var response = pending.get(250, TimeUnit.MILLISECONDS);
+            if (response.statusCode() != 200) throw new IOException("peer rejected");
+            return response.body();
+        } finally { pending.cancel(true); }
     }
     private void tickSafely() {
         if (failed) return;
@@ -191,7 +245,7 @@ public final class RaftNode implements AutoCloseable {
         Vote request;
         synchronized (this) {
             role = "candidate"; leader = -1; term++; votedFor = id; persist(); resetElection();
-            request = new Vote(term, id, lastIndex(), log.get(lastIndex()).term());
+            request = new Vote(term, id, lastIndex(), at(lastIndex()).term());
         }
         int votes = 1;
         for (int peer : peers.keySet()) if (peer != id) {
@@ -215,27 +269,30 @@ public final class RaftNode implements AutoCloseable {
         }
     }
     private void replicate(int peer) throws IOException {
-        Append request;
+        Append request = null;
+        Install transfer = null;
         synchronized (this) {
             if (!role.equals("leader") || failed) return;
             int start = next.get(peer), prev = start - 1;
-            request = new Append(term, id, prev, log.get(prev).term(), committed,
-                new ArrayList<>(log.subList(start, Math.min(log.size(), start + 16))));
+            if (start <= baseIndex) transfer = new Install(term, id, baseIndex, log.get(0).term(), snapshot);
+            else request = new Append(term, id, prev, at(prev).term(), committed,
+                new ArrayList<>(log.subList(start - baseIndex, Math.min(log.size(), start - baseIndex + 16))));
         }
         AppendReply reply;
-        try {var in = input(rpc(peer, "/raft/append", Protocol.append(request)));
+        try {var in = input(transfer == null ? rpc(peer, "/raft/append", Protocol.append(request))
+                    : rpc(peer, "/raft/snapshot", Protocol.install(transfer)));
             reply = new AppendReply(in.readLong(), in.readBoolean(), in.readInt());}
         catch (Exception e) { return; }
         synchronized (this) {
             higherTerm(reply.term());
-            if (term != request.term() || !role.equals("leader")) return;
+            if (term != (transfer == null ? request.term() : transfer.term()) || !role.equals("leader")) return;
             if (!reply.success()) {next.put(peer, Math.max(1, next.get(peer)-1)); return;}
             matched.put(peer, reply.matchIndex()); next.put(peer, reply.matchIndex()+1);
             for (int index = lastIndex(); index > committed; index--) {
-                if (log.get(index).term() != term) continue;
+                if (at(index).term() != term) continue;
                 int copies = 1;
                 for (int other : peers.keySet()) if (other != id && matched.getOrDefault(other, 0) >= index) copies++;
-                if (copies >= 2) {committed = index; persist(); applyCommitted(); notifyAll(); break;}
+                if (copies >= 2) {committed = index; persist(); applyCommitted(); maybeSnapshot(); notifyAll(); break;}
             }
         }
     }

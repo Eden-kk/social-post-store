@@ -70,6 +70,42 @@ public final class SqlEngine {
 
     public SqlEngine() {}
 
+    synchronized void writeSnapshot(java.io.DataOutputStream out) throws java.io.IOException {
+        out.writeInt(tables.size());
+        for (var entry : tables.entrySet()) {
+            Protocol.text(out, entry.getKey()); Table t = entry.getValue();
+            out.writeInt(t.columns.size()); out.writeInt(t.key);
+            for (Column c : t.columns) { Protocol.text(out, c.name()); Protocol.text(out, c.type().name()); }
+            out.writeInt(t.rows.size());
+            for (var row : t.rows.values()) for (int i = 0; i < row.size(); i++) {
+                if (t.columns.get(i).type() == Type.LONG) out.writeLong((Long) row.get(i));
+                else Protocol.text(out, (String) row.get(i));
+            }
+        }
+    }
+    static SqlEngine readSnapshot(java.io.DataInputStream in) throws java.io.IOException {
+        SqlEngine db = new SqlEngine(); int count = SnapshotState.count(in);
+        for (int i = 0; i < count; i++) {
+            String name = Protocol.text(in); int columns = SnapshotState.count(in), key = in.readInt();
+            if (columns == 0 || key < 0 || key >= columns) throw new java.io.IOException("invalid SQL snapshot schema");
+            var cs = new ArrayList<Column>();
+            for (int j = 0; j < columns; j++) {
+                String column = Protocol.text(in); Type type;
+                try { type = Type.valueOf(Protocol.text(in)); } catch (IllegalArgumentException e) { throw new java.io.IOException(e); }
+                cs.add(new Column(column, type));
+            }
+            Table t = new Table(cs, key); int rows = SnapshotState.count(in);
+            if (cs.stream().anyMatch(c -> c.type() == Type.COUNTER) && rows != 0) throw new java.io.IOException("counter rows in snapshot");
+            for (int j = 0; j < rows; j++) {
+                var row = new ArrayList<Object>();
+                for (Column c : cs) row.add(c.type() == Type.LONG ? in.readLong() : Protocol.text(in));
+                if (t.rows.put(row.get(key), row) != null) throw new java.io.IOException("duplicate SQL key");
+            }
+            if (db.tables.put(name, t) != null) throw new java.io.IOException("duplicate SQL table");
+        }
+        return db;
+    }
+
     public synchronized String execute(String sql) {
         try {
             Parser p = new Parser(sql);

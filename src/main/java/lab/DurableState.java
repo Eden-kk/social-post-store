@@ -11,7 +11,17 @@ import static lab.Protocol.*;
 
 /** Whole-state atomic replacement: intentionally simple, not a scalable WAL. */
 public final class DurableState implements AutoCloseable {
-    public record State(long term, int votedFor, int committed, List<Entry> entries) {}
+    public record State(long term, int votedFor, int committed, int baseIndex, long baseTerm,
+                        byte[] snapshot, List<Entry> entries) {
+        public State(long term, int votedFor, int committed, List<Entry> entries) {
+            this(term, votedFor, committed, 0, 0, new byte[0], entries);
+        }
+        @Override public boolean equals(Object other) {
+            return other instanceof State s && term == s.term && votedFor == s.votedFor && committed == s.committed
+                && baseIndex == s.baseIndex && baseTerm == s.baseTerm && Arrays.equals(snapshot, s.snapshot) && entries.equals(s.entries);
+        }
+        @Override public int hashCode() { return Objects.hash(term, votedFor, committed, baseIndex, baseTerm, Arrays.hashCode(snapshot), entries); }
+    }
     private final Path directory;
     private final FileChannel lockChannel;
     private final FileLock lock;
@@ -69,18 +79,30 @@ public final class DurableState implements AutoCloseable {
         if (!MessageDigest.isEqual(digest(body), Arrays.copyOfRange(file, body.length, file.length)))
             throw new IOException("state checksum mismatch");
         var in = input(body);
-        if (in.readInt() != 0x4d535131) throw new IOException("unknown state format");
-        long term = in.readLong(); int voted = in.readInt(), committed = in.readInt(), size = in.readInt();
-        if (term < 0 || size < 0 || size > in.available() / 16 || committed < 0 || committed > size)
+        int magic = in.readInt();
+        if (magic != 0x4d535131 && magic != 0x4d535132) throw new IOException("unknown state format");
+        long term = in.readLong(); int voted = in.readInt(), committed = in.readInt();
+        int base = 0; long baseTerm = 0; byte[] snapshot = new byte[0];
+        if (magic == 0x4d535132) {
+            base = in.readInt(); baseTerm = in.readLong(); int length = in.readInt();
+            if (length < 0 || length > SnapshotState.MAX_BYTES || length > in.available()) throw new IOException("invalid snapshot length");
+            snapshot = in.readNBytes(length);
+            if (base < 0 || baseTerm < 0 || baseTerm > term || (base == 0) != (length == 0)) throw new IOException("invalid snapshot boundary");
+            if (base > 0) SnapshotState.decode(snapshot);
+        }
+        int size = in.readInt();
+        if (term < 0 || size < 0 || size > in.available() / 16 || committed < base || (long) committed > (long) base + size)
             throw new IOException("invalid state metadata");
         var entries = new ArrayList<Entry>();
         for (int i = 0; i < size; i++) entries.add(entry(in));
         if (in.available() != 0) throw new IOException("trailing state bytes");
-        return new State(term, voted, committed, entries);
+        return new State(term, voted, committed, base, baseTerm, snapshot, entries);
     }
     public void save(State state) throws IOException {
-        byte[] body = encode(o -> {o.writeInt(0x4d535131); o.writeLong(state.term());
+        byte[] body = encode(o -> {o.writeInt(0x4d535132); o.writeLong(state.term());
             o.writeInt(state.votedFor()); o.writeInt(state.committed());
+            o.writeInt(state.baseIndex()); o.writeLong(state.baseTerm());
+            o.writeInt(state.snapshot().length); o.write(state.snapshot());
             o.writeInt(state.entries().size()); for (Entry e : state.entries()) entry(o, e);});
         var data = java.nio.ByteBuffer.allocate(body.length + 32).put(body).put(digest(body));
         writeAtomic("state.bin", data.array());

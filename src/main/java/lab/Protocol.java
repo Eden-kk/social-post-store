@@ -13,6 +13,18 @@ public final class Protocol {
     public record Append(long term, int leader, int previousIndex, long previousTerm,
                          int commitIndex, List<Entry> entries) {}
     public record AppendReply(long term, boolean success, int matchIndex) {}
+    public record Install(long term, int leader, int index, long includedTerm, byte[] state) {}
+    public static byte[] install(Install s) throws IOException {
+        return encode(o -> { o.writeLong(s.term()); o.writeInt(s.leader()); o.writeInt(s.index());
+            o.writeLong(s.includedTerm()); o.writeInt(s.state().length); o.write(s.state()); });
+    }
+    public static Install readInstall(byte[] bytes) throws IOException {
+        var in = input(bytes); long term = in.readLong(); int leader = in.readInt(), index = in.readInt();
+        long includedTerm = in.readLong(); int size = in.readInt();
+        if (index <= 0 || includedTerm < 0 || includedTerm > term || size < 0
+                || size > SnapshotState.MAX_BYTES || size != in.available()) throw new IOException("invalid install snapshot");
+        return new Install(term, leader, index, includedTerm, in.readNBytes(size));
+    }
     @FunctionalInterface public interface Writer { void write(DataOutputStream out) throws IOException; }
     public static byte[] encode(Writer writer) throws IOException {
         var bytes = new ByteArrayOutputStream();
