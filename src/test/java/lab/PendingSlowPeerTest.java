@@ -12,10 +12,15 @@ public final class PendingSlowPeerTest {
         var release = new CountDownLatch(1);
         var thirdStarted = new CountDownLatch(1);
         var requests = new java.util.concurrent.atomic.AtomicInteger();
+        var recovered = new java.util.concurrent.atomic.AtomicBoolean();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(executor);
         server.createContext("/raft/like", exchange -> {
             String id = exchange.getRequestHeaders().getFirst("X-Request-ID");
+            if (id.equals("recover") && recovered.get()) {
+                byte[] body = "OK SAME count=1".getBytes();
+                exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close(); return;
+            }
             if (id.startsWith("size-")) {
                 byte[] body = ("OK " + "x".repeat(Integer.parseInt(id.substring(5)) - 3)).getBytes();
                 exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close(); return;
@@ -50,6 +55,18 @@ public final class PendingSlowPeerTest {
                 before = System.nanoTime();
             }
             if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before) > 2500) throw new AssertionError("close blocked");
+            Path recoveryDir = Files.createTempDirectory("slow-recovery-"); String origin;
+            try (var queue = new PendingLikes(recoveryDir, 2, node::pendingLike)) {
+                origin = queue.origin(); queue.enqueue(origin, "recover", "LIKE\tp\tu\tw\t1\ttrue");
+                queue.retry();
+                if (!queue.status(origin, "recover").equals("PENDING")) throw new AssertionError("timeout changed pending status");
+                recovered.set(true); queue.retry();
+                if (!queue.status(origin, "recover").equals("COMMITTED\nOK SAME count=1")) throw new AssertionError("recovery result lost");
+            }
+            try (var queue = new PendingLikes(recoveryDir, 2, (id, body) -> { throw new AssertionError("terminal retry"); })) {
+                queue.retry();
+                if (!queue.status(origin, "recover").equals("COMMITTED\nOK SAME count=1")) throw new AssertionError("recovered result not durable");
+            }
         } finally { release.countDown(); server.stop(0); executor.shutdownNow(); }
         System.out.println("PENDING_SLOW_PEER_TEST_PASSED");
     }
